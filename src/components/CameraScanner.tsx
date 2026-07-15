@@ -59,16 +59,31 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
 
   // OpenCVのロード状態をチェック
   useEffect(() => {
+    console.log("[CameraScanner] Checking CV state...", {
+      cvState: (window as any).cvState,
+      cvExists: !!(window as any).cv
+    });
+    
     const checkCv = () => {
       if ((window as any).cvState === 'ready' || (window as any).cv) {
+        console.log("[CameraScanner] CV is already ready, setting cvReady = true");
         setCvReady(true);
       } else {
-        window.addEventListener('opencv-ready', () => setCvReady(true), { once: true });
+        console.log("[CameraScanner] CV is not ready yet, registering 'opencv-ready' event listener...");
+        const handleReady = () => {
+          console.log("[CameraScanner] 'opencv-ready' event received! setting cvReady = true");
+          setCvReady(true);
+        };
+        window.addEventListener('opencv-ready', handleReady, { once: true });
+        return handleReady;
       }
     };
-    checkCv();
+    
+    const handleReadyCleanup = checkCv();
     return () => {
-      window.removeEventListener('opencv-ready', () => setCvReady(true));
+      if (handleReadyCleanup) {
+        window.removeEventListener('opencv-ready', handleReadyCleanup);
+      }
     };
   }, []);
 

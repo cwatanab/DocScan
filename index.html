@@ -13,16 +13,21 @@
     
     <!-- Load OpenCV.js asynchronously -->
     <script>
-      // OpenCV.jsの読み込み完了ハンドラをグローバルに定義
+      console.log("[OpenCV] Initializing window.Module setup...");
       window.Module = {
         onRuntimeInitialized: function() {
+          console.log("[OpenCV] onRuntimeInitialized callback triggered!");
           window.cvState = 'ready';
-          // カスタムイベントを発火してReact側に通知する
           window.dispatchEvent(new Event('opencv-ready'));
         }
       };
     </script>
-    <script async src="/opencv.js"></script>
+    <script 
+      async 
+      src="/opencv.js" 
+      onload="console.log('[OpenCV] opencv.js script tag successfully loaded')" 
+      onerror="console.error('[OpenCV] opencv.js script tag failed to load')"
+    ></script>
   </head>
   <body>
     <div id="root"></div>
