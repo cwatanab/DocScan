@@ -78,7 +78,14 @@ export default function App() {
           imageSrc={currentRawImage}
           initialCorners={currentCorners}
           onSave={handleSavePage}
-          onCancel={handleStartNewScan}
+          onCancel={() => {
+            setCurrentRawImage(null); // 一時生画像のキャッシュのみクリア
+            if (scannedPages.length > 0) {
+              setStep('export'); // スキャン済ページがある場合はエクスポートプレビューに戻る
+            } else {
+              setStep('scan'); // スキャン済ページがない場合はカメラに戻る
+            }
+          }}
         />
       )}
 
