@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Check, RotateCcw, RotateCw } from 'lucide-react';
+import { RotateCcw, RotateCw } from 'lucide-react';
 import { sortPoints, warpImage, applyFilter, rotateImage90, detectOptimalFilter } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 
@@ -287,7 +287,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           onClick={onCancel}
           className="btn-text-nav"
         >
-          戻る
+          ← 戻る
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>
           {isWarped ? 'フィルタ適用' : 'トリミング調整'}
@@ -296,8 +296,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           onClick={isWarped ? handleConfirm : () => handleWarpPreview(true)}
           className="btn-text-nav btn-text-accent"
         >
-          {isWarped ? <Check style={{ width: '16px', height: '16px', marginRight: '4px', display: 'inline-block', verticalAlign: 'middle' }} /> : null}
-          {isWarped ? '確定' : '補正実行'}
+          {isWarped ? '確定 →' : '次へ →'}
         </button>
       </div>
 
