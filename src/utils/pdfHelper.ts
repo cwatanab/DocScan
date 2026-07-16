@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import type { OcrResult } from './ocrHelper';
 
-// PDF用に画像を長辺1000pxにリサイズし、画質70%の軽量JPEGとして再圧縮する
-async function compressImageForPdf(imageSrc: string, maxDimension: number = 1000): Promise<string> {
+// PDF用に画像を長辺1600pxにリサイズし、画質90%のJPEGとして再圧縮する
+async function compressImageForPdf(imageSrc: string, maxDimension: number = 1600): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -21,8 +21,8 @@ async function compressImageForPdf(imageSrc: string, maxDimension: number = 1000
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0, w, h);
-        // JPEG品質 70% で出力してファイルサイズを劇的に軽量化
-        resolve(canvas.toDataURL('image/jpeg', 0.70));
+        // JPEG品質 95% で出力
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
       } else {
         resolve(imageSrc);
       }
@@ -49,8 +49,8 @@ export async function createSearchablePdf(
   for (const pageData of pages) {
     const { imageSrc, ocrResult } = pageData;
 
-    // PDF埋め込み用に画質を下げ、超軽量な1000px JPEGに変換する
-    const compressedSrc = await compressImageForPdf(imageSrc, 1000);
+    // PDF埋め込み用に画質を設定し、高画質な1600px JPEGに変換する
+    const compressedSrc = await compressImageForPdf(imageSrc, 1600);
 
     // 画像データの埋め込み (PNG / JPEG の自動判定)
     let image: any;

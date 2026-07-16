@@ -7,6 +7,81 @@ export interface Point {
   y: number;
 }
 
+let opencvLoadPromise: Promise<void> | null = null;
+
+/**
+ * OpenCV.js のロードを監視する (シングルトン Promise)
+ * @param timeoutMs タイムアウト時間 (ミリ秒)
+ */
+export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
+  if (opencvLoadPromise) {
+    return opencvLoadPromise;
+  }
+
+  opencvLoadPromise = new Promise<void>((resolve, reject) => {
+    // 既に準備完了している場合
+    if ((window as any).cvState === 'ready' || (window as any).cv) {
+      resolve();
+      return;
+    }
+
+    // window.Moduleのコールバックを保証
+    if (!(window as any).Module) {
+      (window as any).Module = {
+        onRuntimeInitialized: () => {
+          console.log("[OpenCV] onRuntimeInitialized callback triggered!");
+          (window as any).cvState = 'ready';
+          window.dispatchEvent(new Event('opencv-ready'));
+          resolve();
+        }
+      };
+    } else {
+      const oldInit = (window as any).Module.onRuntimeInitialized;
+      (window as any).Module.onRuntimeInitialized = () => {
+        if (oldInit) {
+          try { oldInit(); } catch (e) { console.error(e); }
+        }
+        console.log("[OpenCV] Hooked onRuntimeInitialized callback triggered!");
+        (window as any).cvState = 'ready';
+        window.dispatchEvent(new Event('opencv-ready'));
+        resolve();
+      };
+    }
+
+    // opencv-ready イベントの監視
+    const handleReady = () => {
+      window.removeEventListener('opencv-ready', handleReady);
+      resolve();
+    };
+    window.addEventListener('opencv-ready', handleReady);
+
+    // タイムアウト監視
+    const timer = setTimeout(() => {
+      window.removeEventListener('opencv-ready', handleReady);
+      reject(new Error("OpenCV.js 初期化がタイムアウトしました。ネットワーク接続を確認し、再読み込みしてください。"));
+    }, timeoutMs);
+
+    // HTMLに存在するスクリプトタグのエラーイベントをフック
+    const script = document.getElementById('opencv-script') as HTMLScriptElement | null;
+    if (script) {
+      console.log("[OpenCV] Monitoring existing static script tag...");
+      const oldOnError = script.onerror;
+      script.onerror = (e) => {
+        if (oldOnError) {
+          try { oldOnError(e); } catch (err) { console.error(err); }
+        }
+        clearTimeout(timer);
+        window.removeEventListener('opencv-ready', handleReady);
+        reject(new Error("OpenCV.js スクリプトのダウンロードに失敗しました。"));
+      };
+    } else {
+      console.warn("[OpenCV] Static script tag '#opencv-script' not found in HTML.");
+    }
+  });
+
+  return opencvLoadPromise;
+}
+
 // 頂点のソート (左上, 右上, 右下, 左下)
 export function sortPoints(points: Point[]): Point[] {
   if (points.length !== 4) return points;
@@ -102,7 +177,7 @@ export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLC
 
 
 /**
- * 画像からドキュメントの輪郭（4隅）をハフ変換（直線検出）ベースで自動検出する
+ * 画像からドキュメントの輪郭（4隅）を輪郭検出（findContours）ベースで自動検出する
  * @param srcCanvas 解析元のCanvas
  * @returns 検出された4点。検出できなかった場合はnull
  */
@@ -113,8 +188,9 @@ export function detectDocument(srcCanvas: HTMLCanvasElement): Point[] | null {
 
   if (!cv) return null;
 
-  // 1. 高速化のため、一時的に画像を縮小して処理する
-  const scale = 500 / Math.max(width, height);
+  // 1. 高速化とノイズ抑制のため、画像を縮小して処理する
+  const maxDim = 300; // 長辺 300px に超軽量リサイズ
+  const scale = maxDim / Math.max(width, height);
   const scaledWidth = Math.round(width * scale);
   const scaledHeight = Math.round(height * scale);
 
@@ -125,138 +201,114 @@ export function detectDocument(srcCanvas: HTMLCanvasElement): Point[] | null {
   const gray = new cv.Mat();
   const blurred = new cv.Mat();
   const edged = new cv.Mat();
-  const lines = new cv.Mat();
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
 
   try {
-    // グレースケール化 & ノイズ平滑化
+    // グレースケール化 & ガウシアンブラーで平滑化
     cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
 
-    // Cannyでエッジを抽出
-    cv.Canny(blurred, edged, 50, 150, 3, false);
+    // Canny法でエッジ抽出
+    cv.Canny(blurred, edged, 75, 200);
 
-    // 2. 確率的ハフ変換 (Probabilistic Hough Transform) で直線セグメントを検出
-    // 投票数80以上(よりはっきりした線のみ)、最小の長さ60px(文字や短い線を無視)、直線の隙間許容10pxに厳格化
-    cv.HoughLinesP(edged, lines, 1, Math.PI / 180, 80, 60, 10);
+    // 輪郭同士の接続を強化するため、カーネルサイズ3x3で膨張（Dilate）処理を行う
+    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+    cv.dilate(edged, edged, M);
+    M.delete();
 
-    const horizontalLines: {x1: number, y1: number, x2: number, y2: number, angle: number}[] = [];
-    const verticalLines: {x1: number, y1: number, x2: number, y2: number, angle: number}[] = [];
+    // 輪郭検出
+    cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-    // 直線を「水平に近いグループ」と「垂直に近いグループ」に振り分ける
-    for (let i = 0; i < lines.rows; ++i) {
-      const x1 = lines.data32S[i * 4];
-      const y1 = lines.data32S[i * 4 + 1];
-      const x2 = lines.data32S[i * 4 + 2];
-      const y2 = lines.data32S[i * 4 + 3];
+    let maxArea = 0;
+    let maxContourIndex = -1;
+    let approx = new cv.Mat();
 
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    // 検出するドキュメントの最小面積しきい値（画像全体の15%以上）
+    const minAreaThreshold = (scaledWidth * scaledHeight) * 0.15;
 
-      let normAngle = angle;
-      if (normAngle > 90) normAngle -= 180;
-      if (normAngle < -90) normAngle += 180;
+    // 面積が最大で、多角形近似した際に4頂点の凸四角形となるものを探す
+    for (let i = 0; i < contours.size(); ++i) {
+      const contour = contours.get(i);
+      const area = cv.contourArea(contour);
 
-      // ほぼ水平 (傾き -25〜25 度) - 角度条件を少し絞る
-      if (Math.abs(normAngle) < 25) {
-        horizontalLines.push({ x1, y1, x2, y2, angle: normAngle });
-      }
-      // ほぼ垂直 (傾き 65〜90 度 または -90〜-65 度) - 角度条件を少し絞る
-      else if (Math.abs(normAngle) > 65) {
-        verticalLines.push({ x1, y1, x2, y2, angle: normAngle });
-      }
-    }
+      if (area > minAreaThreshold && area > maxArea) {
+        const peri = cv.arcLength(contour, true);
+        const tempApprox = new cv.Mat();
+        
+        // 輪郭の近似化 (アルゴリズムの許容誤差を設定)
+        cv.approxPolyDP(contour, tempApprox, 0.02 * peri, true);
 
-    // 3. すべての水平線と垂直線の組み合わせについて、交点 (Intersection) を計算
-    const intersections: Point[] = [];
-    for (const h of horizontalLines) {
-      for (const v of verticalLines) {
-        const pt = getLineIntersection(h, v);
-        if (pt) {
-          // 画面の少し内側（マージン考慮）に収まる交点のみ採用
-          if (pt.x >= -20 && pt.x <= scaledWidth + 20 && pt.y >= -20 && pt.y <= scaledHeight + 20) {
-            intersections.push(pt);
-          }
+        // 4頂点かつ凸多角形であることを確認
+        if (tempApprox.rows === 4 && cv.isContourConvex(tempApprox)) {
+          maxArea = area;
+          maxContourIndex = i;
+          approx.delete();
+          approx = tempApprox;
+        } else {
+          tempApprox.delete();
         }
       }
     }
 
-    // 4. 交点群を画面の「左上・右上・右下・左下」の4象限にクラスタリングする
-    if (intersections.length >= 4) {
-      const midX = scaledWidth / 2;
-      const midY = scaledHeight / 2;
-
-      const qTl: Point[] = [];
-      const qTr: Point[] = [];
-      const qBr: Point[] = [];
-      const qBl: Point[] = [];
-
-      for (const pt of intersections) {
-        if (pt.x < midX && pt.y < midY) qTl.push(pt);
-        else if (pt.x >= midX && pt.y < midY) qTr.push(pt);
-        else if (pt.x >= midX && pt.y >= midY) qBr.push(pt);
-        else if (pt.x < midX && pt.y >= midY) qBl.push(pt);
+    // 4角形が正しく検出された場合
+    if (maxContourIndex !== -1 && approx.rows === 4) {
+      const pts: Point[] = [];
+      for (let i = 0; i < 4; i++) {
+        const x = approx.data32S[i * 2];
+        const y = approx.data32S[i * 2 + 1];
+        pts.push({
+          x: Math.max(0, Math.min(Math.round(x / scale), width)),
+          y: Math.max(0, Math.min(Math.round(y / scale), height))
+        });
       }
+      approx.delete();
+      return sortPoints(pts);
+    }
 
-      // 各象限で、最も「画面の四隅」に近い外側の代表的な交点を1点ずつ抽出
-      if (qTl.length > 0 && qTr.length > 0 && qBr.length > 0 && qBl.length > 0) {
-        const getRepresentativePoint = (pts: Point[], quadrant: 'tl' | 'tr' | 'br' | 'bl'): Point => {
-          return pts.reduce((best, curr) => {
-            switch (quadrant) {
-              case 'tl': return (curr.x + curr.y < best.x + best.y) ? curr : best;
-              case 'tr': return (curr.x - curr.y > best.x - best.y) ? curr : best;
-              case 'br': return (curr.x + curr.y > best.x + best.y) ? curr : best;
-              case 'bl': return (curr.y - curr.x > best.y - best.x) ? curr : best;
-            }
-          });
-        };
+    approx.delete();
 
-        const tl = getRepresentativePoint(qTl, 'tl');
-        const tr = getRepresentativePoint(qTr, 'tr');
-        const br = getRepresentativePoint(qBr, 'br');
-        const bl = getRepresentativePoint(qBl, 'bl');
-
-        const pts = [tl, tr, br, bl].map(pt => ({
-          x: Math.round(pt.x / scale),
-          y: Math.round(pt.y / scale)
-        }));
-
-        const clampedPts = pts.map(pt => ({
-          x: Math.max(0, Math.min(pt.x, width)),
-          y: Math.max(0, Math.min(pt.y, height))
-        }));
-
-        return sortPoints(clampedPts);
+    // -- フォールバック処理 --
+    // きれいな凸四角形が検出できなかった場合、面積が最大である輪郭の
+    // 最小境界回転四角形 (minAreaRect) を計算して 4隅を推定する
+    maxArea = 0;
+    let fallbackContourIndex = -1;
+    for (let i = 0; i < contours.size(); ++i) {
+      const contour = contours.get(i);
+      const area = cv.contourArea(contour);
+      if (area > minAreaThreshold && area > maxArea) {
+        maxArea = area;
+        fallbackContourIndex = i;
       }
     }
+
+    if (fallbackContourIndex !== -1) {
+      const contour = contours.get(fallbackContourIndex);
+      const rotatedRect = cv.minAreaRect(contour);
+      const vertices = cv.RotatedRect.points(rotatedRect);
+      const pts: Point[] = [];
+      for (let i = 0; i < 4; i++) {
+        pts.push({
+          x: Math.max(0, Math.min(Math.round(vertices[i].x / scale), width)),
+          y: Math.max(0, Math.min(Math.round(vertices[i].y / scale), height))
+        });
+      }
+      return sortPoints(pts);
+    }
+
   } catch (e) {
-    console.error("Error in HoughLines document detection: ", e);
+    console.error("Error in contour document detection: ", e);
   } finally {
     src.delete();
     resized.delete();
     gray.delete();
     blurred.delete();
     edged.delete();
-    lines.delete();
+    contours.delete();
+    hierarchy.delete();
   }
 
   return null;
-}
-
-// 2本の直線の交点を算出する数学的ヘルパー
-function getLineIntersection(
-  l1: {x1: number, y1: number, x2: number, y2: number},
-  l2: {x1: number, y1: number, x2: number, y2: number}
-): Point | null {
-  const d = (l1.x1 - l1.x2) * (l2.y1 - l2.y2) - (l1.y1 - l1.y2) * (l2.x1 - l2.x2);
-  if (Math.abs(d) < 1e-5) return null; // 平行
-
-  const t = ((l1.x1 - l2.x1) * (l2.y1 - l2.y2) - (l1.y1 - l2.y1) * (l2.x1 - l2.x2)) / d;
-  
-  return {
-    x: l1.x1 + t * (l1.x2 - l1.x1),
-    y: l1.y1 + t * (l1.y2 - l1.y1)
-  };
 }
 
 
@@ -277,13 +329,17 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
   resultCanvas.height = canvas.height;
 
   if (mode === 'color') {
-    // カラーモード: 紙の影を除去し、インクの色鮮やかさを保ちつつコントラストを最適化する
+    // カラーモード: 紙の陰影ムラを除去（除算）しつつ、インクの鮮やかさを残してガンマ補正をかける
+    const channels = new cv.MatVector();
+    cv.split(src, channels);
+    
+    // ガンマ補正用LUTの作成
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    const gamma = 0.70; // やや明るくし背景を白く飛ばすガンマ値
-    const minVal = 35;  // 35以下の暗い部分を黒へ引き締める
-    const maxVal = 215; // 215以上の明るい背景を白へ飛ばす
+    const gamma = 1.25; // カラーの階調を破綻させず背景を明るくする適正なガンマ値
+    const minVal = 20;  // カラーインクの色味を残すために黒引き締めは浅めにする
+    const maxVal = 235; // ハイライト（背景の紙）を白へ伸ばすしきい値
     
     for (let i = 0; i < 256; i++) {
       let val = i;
@@ -299,16 +355,39 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     }
     lut.data.set(data);
 
-    // RGB チャンネルを分割し、個別にレベル&ガンマ補正テーブルを適用 (Aチャンネルは除外)
-    const channels = new cv.MatVector();
-    cv.split(src, channels);
+    // RGBの各チャンネルごとに背景除算＋ガンマ補正を適用
+    const kernelSize = 33;
+    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
+
     for (let c = 0; c < 3; c++) {
       const ch = channels.get(c);
+      
+      // 背景推定 (膨張 + メディアンフィルタ)
+      const dilated = new cv.Mat();
+      const bg = new cv.Mat();
+      cv.dilate(ch, dilated, M);
+      cv.medianBlur(dilated, bg, kernelSize);
+      
+      // 影ムラを除去（除算）し背景を白く飛ばす
+      cv.divide(ch, bg, ch, 255.0);
+      
+      // ガンマ・レベル補正を適用
       cv.LUT(ch, lut, ch);
+      
+      dilated.delete();
+      bg.delete();
     }
+
     cv.merge(channels, dst);
 
+    M.delete();
     lut.delete();
+    
+    // 各チャンネルのメモリ解放
+    for (let c = 0; c < channels.size(); c++) {
+      const ch = channels.get(c);
+      ch.delete();
+    }
     channels.delete();
   } else if (mode === 'mono') {
     // モノクロ化（白黒2値化）
@@ -327,23 +406,23 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
     
     // 背景の推定 (膨張・平滑化)
+    // カーネルサイズを 19 から 33 に拡大し、細い罫線や文字が背景とみなされて消去されるのを防ぐ
     const dilated = new cv.Mat();
     const bg = new cv.Mat();
-    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(19, 19));
+    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
     cv.dilate(dst, dilated, M);
-    cv.medianBlur(dilated, bg, 19);
+    cv.medianBlur(dilated, bg, 33);
     
     // 元画像 / 背景推定画像 の除算 (Division) を行い、陰影ムラを完全に白(255)へ平滑化する
-    // これにより黒枠やゴミ等の外れ値の影響を受けずに、文字のコントラストが最大化される
     cv.divide(dst, bg, dst, 255.0);
 
     // ガンマ補正 & しきい値ストレッチで、背景を完全な白に、文字を完全な黒にする
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    const gamma = 2.4;  // ガンマ値のみを大幅に引き上げ、階調を潰さずに中間トーン(文字)を漆黒へ引き締める
-    const minVal = 45;  // 黒にするしきい値は上げず、元の穏やかな範囲に維持
-    const maxVal = 195; // 白にするしきい値は上げず、元の穏やかな範囲に維持
+    const gamma = 1.5;  // ガンマ補正を適度に抑え、罫線などの中間トーンの細い線が消えるのを防ぐ
+    const minVal = 30;  // 黒の引き締め開始しきい値。少し下げることで、薄い文字もしっかり黒くする
+    const maxVal = 225; // 白飛びのしきい値。195から225に引き上げることで、薄いグレー（罫線など）を残す
     
     for (let i = 0; i < 256; i++) {
       let val = i;
@@ -374,8 +453,8 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
 }
 
 /**
- * 画像を90度時計回りに回転させる
- * @param canvas 回転対象のCanvas
+ * 画像を90度反時計回りに回転させる（左回転）
+ * @param canvas 回転対象 of Canvas
  * @returns 回転後の新しいCanvas
  */
 export function rotateImage90(canvas: HTMLCanvasElement): HTMLCanvasElement {
@@ -386,8 +465,8 @@ export function rotateImage90(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const dst = new cv.Mat();
   const resultCanvas = document.createElement('canvas');
 
-  // 90度時計回りに回転
-  cv.rotate(src, dst, cv.ROTATE_90_CLOCKWISE);
+  // 90度反時計回りに回転
+  cv.rotate(src, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
   
   // imshowするためにCanvasのサイズを入れ替える
   resultCanvas.width = canvas.height;
@@ -438,3 +517,71 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
 
   return score;
 }
+
+/**
+ * 画像の色彩や特徴量を解析し、最適なフィルターモードを自動判定する
+ * @param canvas 解析対象の補正後画像Canvas
+ * @returns 'color' | 'mono' | 'document'
+ */
+export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'mono' | 'document' {
+  const cv = (window as any).cv;
+  if (!cv || !cv.Mat) {
+    return 'document'; // フォールバック
+  }
+
+  let src = cv.imread(canvas);
+  let hsv = new cv.Mat();
+  
+  try {
+    // 1. カラーかどうかの判定 (HSVに変換し、Sチャンネルの平均値を見る)
+    cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+    
+    // HSVの各チャンネルを分離
+    let channels = new cv.MatVector();
+    cv.split(hsv, channels);
+    
+    let sChan = channels.get(1); // S（彩度）チャンネルを取得
+    let meanSat = cv.mean(sChan)[0]; // 彩度の平均値 (0-255)
+    
+    sChan.delete();
+    channels.delete();
+
+    // 彩度の平均値が 15 以上なら「カラー画像」とみなす
+    // (紙面の白い部分のノイズ程度なら平均彩度は 3〜8 に収まります。文字や写真に色が入ると15を軽々と超えます)
+    if (meanSat > 15) {
+      return 'color';
+    }
+
+    // 2. モノクロの場合、ドキュメント(白黒はっきり)か、モノクロ写真/イラストかの判定
+    // 文字ドキュメントの特徴である「双峰性の輝度分布 (白と黒がはっきり分かれる)」を簡易的に判別するため、
+    // グレースケール画像の標準偏差（コントラストの強さ）をチェックする
+    let gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    
+    let mean = new cv.Mat();
+    let stddev = new cv.Mat();
+    cv.meanStdDev(gray, mean, stddev);
+    
+    // stddev.doubleAt(0, 0) で標準偏差を取得
+    const stddevVal = stddev.doubleAt(0, 0);
+    
+    mean.delete();
+    stddev.delete();
+    gray.delete();
+
+    // 標準偏差が低い（コントラストが弱い、グレーの中間調が多いモノクロ写真など）場合は 'mono'
+    // 標準偏差が高い（白と黒のメリハリが強い書類）場合は 'document' を選択
+    if (stddevVal < 45) {
+      return 'mono';
+    }
+  } catch (e) {
+    console.error("Error in detecting optimal filter: ", e);
+  } finally {
+    hsv.delete();
+    src.delete();
+  }
+
+  return 'document';
+}
+

@@ -14,6 +14,7 @@ export default function App() {
   const [currentRawImage, setCurrentRawImage] = useState<string | null>(null);
   const [currentCorners, setCurrentCorners] = useState<Point[]>([]);
   const [scannedPages, setScannedPages] = useState<string[]>([]); // 補正済画像のリスト
+  const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf'); // エクスポートモードの保存（トグルの状態を反映）
 
   // トランジション飛行画像（確定時のアニメーション）用の状態
   const [flyingImage, setFlyingImage] = useState<{
@@ -39,9 +40,11 @@ export default function App() {
   const handleSavePage = (
     warpedImageSrc: string,
     _filterMode: 'color' | 'mono' | 'document',
+    enableOcr: boolean,
     rect?: DOMRect | null
   ) => {
     setScannedPages(prev => [...prev, warpedImageSrc]);
+    setExportMode(enableOcr ? 'pdf' : 'jpeg');
 
     if (rect) {
       setFlyingImage({
@@ -82,6 +85,7 @@ export default function App() {
       {step === 'export' && (
         <ExportPreview
           pages={scannedPages}
+          exportMode={exportMode}
           onComplete={handleExportComplete}
           onBackToScanner={() => {
             setCurrentRawImage(null); // 再撮影用に一時生画像キャッシュをクリア

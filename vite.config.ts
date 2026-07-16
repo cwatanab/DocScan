@@ -10,7 +10,7 @@ export default defineConfig({
     basicSsl(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'opencv.js'],
+      includeAssets: ['favicon.svg'],
       manifest: {
         name: 'DocScan',
         short_name: 'DocScan',
@@ -30,7 +30,24 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024, // OpenCV.js (10MB) キャッシュのため
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        globIgnores: ['**/opencv.js'],
+        runtimeCaching: [
+          {
+            urlPattern: /opencv\.js(\?.*)?$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'opencv-cache',
+              expiration: {
+                maxEntries: 1,
+                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          }
+        ]
       }
     })
   ]

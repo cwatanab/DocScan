@@ -6,6 +6,7 @@ import { createSearchablePdf } from '../utils/pdfHelper';
 
 interface ExportPreviewProps {
   pages: string[]; // 補正済み画像のDataURL配列
+  exportMode: 'pdf' | 'jpeg';
   onComplete: () => void;
   onBackToScanner: () => void;
 }
@@ -195,11 +196,13 @@ const ZoomableImage: React.FC<{ src: string; alt: string; onClose: () => void }>
 
 export const ExportPreview: React.FC<ExportPreviewProps> = ({
   pages,
+  exportMode,
   onComplete,
   onBackToScanner
 }) => {
   const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({});
-  const [isProcessing, setIsProcessing] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false); // 初期表示はOCRを実行しないため非ローディング
+  const [ocrDone, setOcrDone] = useState(false);
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [activeTab, setActiveTab] = useState<'pdf' | 'text'>('pdf');
   const [error, setError] = useState<string | null>(null);
@@ -207,55 +210,111 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   // 拡大プレビュー用のステート
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 全ページのOCRとPDF生成のフロー
-  useEffect(() => {
-    const runOcrAndGeneratePdf = async () => {
-      try {
-        setIsProcessing(true);
-        setError(null);
-        const results: { [key: number]: OcrResult } = {};
+  // 撮影日時のタイムスタンプ文字列 (YYYYMMDD_HHMMSS) を生成するヘルパー
+  const getFormattedTimestamp = (): string => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}_${hh}${min}${ss}`;
+  };
 
-        // 各ページをシーケンシャルにOCRにかける
-        for (let i = 0; i < pages.length; i++) {
+  // 全ページのJPEGの概算合計サイズ(MB)を計算する
+  const getJpegsTotalSizeMb = (): string => {
+    let totalBytes = 0;
+    for (const page of pages) {
+      const base64Data = page.split(',')[1] || page;
+      totalBytes += Math.round((base64Data.length * 3) / 4);
+    }
+    // 品質95%での再圧縮により、元のDataURL（品質90%）に比べてわずかにファイルサイズが増加するため、
+    // 補正係数 0.95 を乗算
+    return ((totalBytes * 0.95) / 1024 / 1024).toFixed(2);
+  };
+
+  // 必要に応じてOCRおよびPDFを遅延評価（生成）する関数
+  const ensurePdfGenerated = async (): Promise<Blob | null> => {
+    if (pdfBlob) return pdfBlob;
+
+    try {
+      setIsProcessing(true);
+      setError(null);
+      const results: { [key: number]: OcrResult } = { ...ocrResults };
+
+      // まだOCRが行われていないページがあれば実行
+      for (let i = 0; i < pages.length; i++) {
+        if (!results[i]) {
           const ocrResult = await performOcr(pages[i]);
           results[i] = ocrResult;
           setOcrResults(prev => ({ ...prev, [i]: ocrResult }));
         }
-
-        // サーチャブルPDFの生成
-        const pdfData = pages.map((imageSrc, index) => ({
-          imageSrc,
-          ocrResult: results[index]
-        }));
-
-        const generatedBlob = await createSearchablePdf(pdfData);
-        setPdfBlob(generatedBlob);
-      } catch (err: any) {
-        console.error('Export error:', err);
-        setError('PDFの生成中にエラーが発生しました。もう一度お試しください。');
-      } finally {
-        setIsProcessing(false);
       }
-    };
+      setOcrDone(true);
 
-    runOcrAndGeneratePdf();
-  }, [pages]);
+      // サーチャブルPDFの生成
+      const pdfData = pages.map((imageSrc, index) => ({
+        imageSrc,
+        ocrResult: results[index]
+      }));
+
+      const generatedBlob = await createSearchablePdf(pdfData);
+      setPdfBlob(generatedBlob);
+      return generatedBlob;
+    } catch (err: any) {
+      console.error('PDF generation error:', err);
+      setError('PDFの生成中にエラーが発生しました。もう一度お試しください。');
+      return null;
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   // PDFダウンロード
-  const handleDownloadPdf = () => {
-    if (!pdfBlob) return;
-    const url = URL.createObjectURL(pdfBlob);
+  const handleDownloadPdf = async () => {
+    const blob = await ensurePdfGenerated();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `スキャン_${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.download = `SCAN_${getFormattedTimestamp()}.pdf`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  // WebP(画像)として保存 (iOS SafariなどのWebPエンコード非対応環境を考慮した軽量化対応)
-  const handleDownloadWebp = async (imageSrc: string, index: number) => {
+  // DataURL画像(PNG等)を JPEG の File オブジェクトに変換するヘルパー
+  const convertToJpegFile = async (imageSrc: string, filename: string): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const file = new File([blob], filename, { type: 'image/jpeg' });
+              resolve(file);
+            } else {
+              reject(new Error("Blob generation failed"));
+            }
+          }, 'image/jpeg', 0.95);
+        } else {
+          reject(new Error("Canvas context failed"));
+        }
+      };
+      img.onerror = () => reject(new Error("Image load failed"));
+      img.src = imageSrc;
+    });
+  };
+
+  // JPEG(画像)として保存
+  const handleDownloadJpeg = async (imageSrc: string, index: number) => {
     try {
       const img = new Image();
       img.onload = () => {
@@ -266,27 +325,12 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         if (ctx) {
           ctx.drawImage(img, 0, 0);
           
-          // まずブラウザが WebP のエンコードに対応しているかテストする
-          const testUrl = canvas.toDataURL('image/webp');
-          const isWebpSupported = testUrl.startsWith('data:image/webp');
+          // 画質 95% の JPEG としてエンコード
+          const outputUrl = canvas.toDataURL('image/jpeg', 0.95);
           
-          let outputUrl: string;
-          let ext: string;
-
-          if (isWebpSupported) {
-            // WebP 対応ブラウザ (Chrome等): 画質80%で高圧縮
-            outputUrl = canvas.toDataURL('image/webp', 0.80);
-            ext = 'webp';
-          } else {
-            // iOS Safari等 (WebPデコードはできるが、エンコード非対応のブラウザ):
-            // デフォルトのPNGフォールバックを防ぐため、明示的に JPEG品質80% で再圧縮してサイズを劇的に軽量化する
-            outputUrl = canvas.toDataURL('image/jpeg', 0.80);
-            ext = 'jpg';
-          }
-
           const a = document.createElement('a');
           a.href = outputUrl;
-          a.download = `スキャン_ページ_${index + 1}.${ext}`;
+          a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -294,30 +338,88 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       };
       img.src = imageSrc;
     } catch (err) {
-      console.error('Failed to convert and download as WebP:', err);
+      console.error('Failed to convert and download as JPEG:', err);
       // 失敗時のフォールバック (そのままダウンロード)
       const a = document.createElement('a');
       a.href = imageSrc;
-      a.download = `スキャン_ページ_${index + 1}.jpg`;
+      a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
     }
   };
 
+  // 全ページをJPEGとして順次ダウンロード保存
+  const handleDownloadAllJpegs = async () => {
+    for (let i = 0; i < pages.length; i++) {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          handleDownloadJpeg(pages[i], i);
+          resolve();
+        }, i * 300); // ブラウザブロック防止のため300msの間隔をあける
+      });
+    }
+  };
+
+  // 個別JPEGの共有
+  const handleShareSingleJpeg = async (imageSrc: string, index: number) => {
+    try {
+      const fileName = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
+      const file = await convertToJpegFile(imageSrc, fileName);
+      
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+        });
+      } else {
+        handleDownloadJpeg(imageSrc, index);
+      }
+    } catch (err) {
+      console.error("Failed to share single JPEG:", err);
+      handleDownloadJpeg(imageSrc, index);
+    }
+  };
+
+  // 全ページの一括JPEG共有
+  const handleShareJpegs = async () => {
+    try {
+      setIsProcessing(true);
+      const filesList: File[] = [];
+      
+      for (let i = 0; i < pages.length; i++) {
+        const fileName = `SCAN_${getFormattedTimestamp()}_${String(i + 1).padStart(3, '0')}.jpg`;
+        const file = await convertToJpegFile(pages[i], fileName);
+        filesList.push(file);
+      }
+      
+      setIsProcessing(false);
+
+      if (navigator.canShare && navigator.canShare({ files: filesList })) {
+        await navigator.share({
+          files: filesList,
+        });
+      } else {
+        handleDownloadAllJpegs();
+      }
+    } catch (err) {
+      console.error("Failed to share JPEGs:", err);
+      setIsProcessing(false);
+      handleDownloadAllJpegs();
+    }
+  };
+
   // 共有（Web Share API）
   const handleShare = async () => {
-    if (!pdfBlob) return;
+    const blob = await ensurePdfGenerated();
+    if (!blob) return;
     
-    const fileName = `スキャン_${new Date().toISOString().slice(0, 10)}.pdf`;
-    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+    const fileName = `SCAN_${getFormattedTimestamp()}.pdf`;
+    const file = new File([blob], fileName, { type: 'application/pdf' });
     
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({
           files: [file],
-          title: 'スキャン書類',
-          text: 'Document Scannerから作成されたPDFです。',
         });
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -325,7 +427,38 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         }
       }
     } else {
-      handleDownloadPdf();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  // タブ切り替えハンドラ（テキストタブ選択時に自動的にOCRを走らせる）
+  const handleTabChange = async (tab: 'pdf' | 'text') => {
+    setActiveTab(tab);
+    if (tab === 'text' && !ocrDone) {
+      try {
+        setIsProcessing(true);
+        const results: { [key: number]: OcrResult } = { ...ocrResults };
+        for (let i = 0; i < pages.length; i++) {
+          if (!results[i]) {
+            const res = await performOcr(pages[i]);
+            results[i] = res;
+            setOcrResults(prev => ({ ...prev, [i]: res }));
+          }
+        }
+        setOcrDone(true);
+      } catch (err) {
+        console.error('OCR tab loading failed:', err);
+        setError('OCR処理中にエラーが発生しました。もう一度お試しください。');
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -400,20 +533,23 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       </div>
 
       {/* タブ切り替え */}
-      <div className="export-tab-bar">
-        <button
-          onClick={() => setActiveTab('pdf')}
-          className={`export-tab-btn ${activeTab === 'pdf' ? 'export-tab-btn-active' : ''}`}
-        >
-          PDFプレビュー
-        </button>
-        <button
-          onClick={() => setActiveTab('text')}
-          className={`export-tab-btn ${activeTab === 'text' ? 'export-tab-btn-active' : ''}`}
-        >
-          OCRテキスト
-        </button>
-      </div>
+      {/* タブ切り替え */}
+      {exportMode === 'pdf' && (
+        <div className="export-tab-bar">
+          <button
+            onClick={() => handleTabChange('pdf')}
+            className={`export-tab-btn ${activeTab === 'pdf' ? 'export-tab-btn-active' : ''}`}
+          >
+            PDFプレビュー
+          </button>
+          <button
+            onClick={() => handleTabChange('text')}
+            className={`export-tab-btn ${activeTab === 'text' ? 'export-tab-btn-active' : ''}`}
+          >
+            OCRテキスト
+          </button>
+        </div>
+      )}
 
       {/* プレビュー表示エリア */}
       <div className="export-content-area">
@@ -421,15 +557,18 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           /* PDF/画像プレビュー */
           <div style={{ width: '100%', maxWidth: '360px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="preview-pdf-info-card">
-              <div className="pdf-icon-wrapper">
-                <FileText style={{ width: '24px', height: '24px' }} />
+              <div className="pdf-icon-wrapper" style={{ backgroundColor: exportMode === 'jpeg' ? '#e0e7ff' : undefined }}>
+                <FileText style={{ width: '24px', height: '24px', color: exportMode === 'jpeg' ? '#4f46e5' : undefined }} />
               </div>
               <div className="pdf-info-text">
                 <h4 className="pdf-info-filename">
-                  スキャンドキュメント.pdf
+                  {exportMode === 'jpeg' ? 'スキャン画像 (JPEG一括)' : 'スキャンドキュメント.pdf'}
                 </h4>
                 <p className="pdf-info-meta">
-                  {pages.length} ページ • {pdfBlob ? (pdfBlob.size / 1024 / 1024).toFixed(2) : 0} MB
+                  {exportMode === 'jpeg' 
+                    ? `${pages.length} ページ • 約 ${getJpegsTotalSizeMb()} MB` 
+                    : `${pages.length} ページ • ${pdfBlob ? `${(pdfBlob.size / 1024 / 1024).toFixed(2)} MB` : '未生成 (保存時に作成)'}`
+                  }
                 </p>
               </div>
               <CheckCircle2 style={{ width: '20px', height: '20px', color: '#10b981' }} />
@@ -453,13 +592,23 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
                     <span className="thumbnail-card-title">
                       ページ {idx + 1}
                     </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDownloadWebp(page, idx); }}
-                      className="thumbnail-card-download"
-                      title="WebPとして保存"
-                    >
-                      <Download style={{ width: '12px', height: '12px' }} />
-                    </button>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleShareSingleJpeg(page, idx); }}
+                        className="thumbnail-card-download"
+                        style={{ backgroundColor: '#4f46e5' }}
+                        title="JPEGを共有"
+                      >
+                        <Share2 style={{ width: '12px', height: '12px' }} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDownloadJpeg(page, idx); }}
+                        className="thumbnail-card-download"
+                        title="JPEGとして保存"
+                      >
+                        <Download style={{ width: '12px', height: '12px' }} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -498,22 +647,72 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       </div>
 
       {/* 下部アクションバー */}
-      <div className="export-footer">
-        <button
-          onClick={handleShare}
-          className="btn-primary-large"
-        >
-          <Share2 style={{ width: '20px', height: '20px' }} />
-          PDFを共有・送信する
-        </button>
+      <div className="export-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 20px' }}>
+        {exportMode === 'jpeg' ? (
+          /* JPEG用アクション (OCRなし・高速画像出力) */
+          <>
+            <button
+              onClick={handleShareJpegs}
+              className="btn-primary-large"
+              style={{ width: '100%', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', backgroundColor: '#4f46e5' }}
+            >
+              <Share2 style={{ width: '20px', height: '20px' }} />
+              JPEG画像を共有・送信する
+            </button>
+            
+            <button
+              onClick={handleDownloadAllJpegs}
+              className="btn-secondary-large"
+              style={{ width: '100%', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px', borderRadius: '16px', fontWeight: '700', backgroundColor: '#334155', border: '1px solid #475569', color: '#fff' }}
+            >
+              <Download style={{ width: '18px', height: '18px' }} />
+              JPEG保存 ({pages.length}枚)
+            </button>
+          </>
+        ) : (
+          /* PDF用アクション (OCR付きサーチャブルPDF) */
+          <>
+            <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+              <button
+                onClick={handleShare}
+                className="btn-primary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}
+              >
+                <Share2 style={{ width: '18px', height: '18px' }} />
+                PDFを共有
+              </button>
+              
+              <button
+                onClick={handleShareJpegs}
+                className="btn-primary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', backgroundColor: '#4f46e5' }}
+              >
+                <Share2 style={{ width: '18px', height: '18px' }} />
+                JPEGを共有
+              </button>
+            </div>
 
-        <button
-          onClick={handleDownloadPdf}
-          className="btn-secondary-large"
-        >
-          <Download style={{ width: '18px', height: '18px' }} />
-          PDFをダウンロード保存
-        </button>
+            <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+              <button
+                onClick={handleDownloadPdf}
+                className="btn-secondary-large"
+                style={{ flex: 1, width: 'auto', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+              >
+                <Download style={{ width: '16px', height: '16px' }} />
+                PDF保存
+              </button>
+              
+              <button
+                onClick={handleDownloadAllJpegs}
+                className="btn-secondary-large"
+                style={{ flex: 1, width: 'auto', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontSize: '13px', backgroundColor: '#334155', border: '1px solid #475569' }}
+              >
+                <Download style={{ width: '16px', height: '16px' }} />
+                JPEG保存 ({pages.length}枚)
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* サムネイルクリック時の拡大プレビュー (Zoomable Lightbox) */}

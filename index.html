@@ -11,9 +11,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="DocScan" />
     
-    <!-- Load OpenCV.js asynchronously -->
+    <!-- Define OpenCV global Module before load -->
     <script>
-      console.log("[OpenCV] Initializing window.Module setup...");
+      console.log("[OpenCV] Initializing window.Module setup in HTML...");
       window.Module = {
         onRuntimeInitialized: function() {
           console.log("[OpenCV] onRuntimeInitialized callback triggered!");
@@ -24,7 +24,8 @@
     </script>
     <script 
       async 
-      src="/opencv.js" 
+      src="/opencv.js?v=2" 
+      id="opencv-script"
       onload="console.log('[OpenCV] opencv.js script tag successfully loaded')" 
       onerror="console.error('[OpenCV] opencv.js script tag failed to load')"
     ></script>
