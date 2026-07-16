@@ -284,7 +284,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       {/* ヘッダーバー */}
       <div className="header-bar">
         <button
-          onClick={onCancel}
+          onClick={isWarped ? () => setIsWarped(false) : onCancel}
           className="btn-text-nav"
         >
           {"< 戻る"}
