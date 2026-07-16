@@ -287,7 +287,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           onClick={onCancel}
           className="btn-text-nav"
         >
-          ← 戻る
+          {"< 戻る"}
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>
           {isWarped ? 'フィルタ適用' : 'トリミング調整'}
@@ -296,7 +296,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           onClick={isWarped ? handleConfirm : () => handleWarpPreview(true)}
           className="btn-text-nav btn-text-accent"
         >
-          {isWarped ? '確定 →' : '次へ →'}
+          {isWarped ? '確定 >' : '次へ >'}
         </button>
       </div>
 

@@ -650,14 +650,14 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           onClick={onBackToEdit || onBackToScanner}
           className="btn-text-nav"
         >
-          ← 戻る
+          {"< 戻る"}
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>エクスポート</h3>
         <button
           onClick={onComplete}
           className="btn-text-nav btn-text-accent"
         >
-          完了 →
+          {"完了 >"}
         </button>
       </div>
 
