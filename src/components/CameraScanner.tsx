@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image as ImageIcon, Loader2, Sparkles } from 'lucide-react';
 import { detectDocument, calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
+import { useCameraStream } from './useCameraStream';
 
 interface CameraScannerProps {
   onCapture: (imageSrc: string, initialCorners: Point[]) => void;
@@ -53,10 +54,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   
   const [cvReady, setCvReady] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
 
   // OpenCVのロード状態をチェック＆動的ロード
   useEffect(() => {
@@ -80,55 +77,17 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     };
   }, []);
 
-  // カメラの起動
-  useEffect(() => {
-    if (!cvReady) return;
+  // カメラストリーム制御のカスタムフック呼び出し
+  const {
+    cameraActive,
+    errorMsg,
+    stopCamera: stopCameraStream,
+    animationFrameRef
+  } = useCameraStream({ videoRef, cvReady });
 
-    const startCamera = async () => {
-      try {
-        setErrorMsg(null);
-        const constraints: MediaStreamConstraints = {
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
-          audio: false
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = stream;
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute('playsinline', 'true');
-          videoRef.current.setAttribute('muted', 'true');
-          videoRef.current.play();
-          setCameraActive(true);
-        }
-      } catch (err: any) {
-        console.error('Camera access error:', err);
-        setErrorMsg('カメラの起動に失敗しました。Safariの設定でカメラ許可を確認してください。');
-      }
-    };
-
-    startCamera();
-
-    return () => {
-      stopCamera();
-    };
-  }, [cvReady]);
-
-  // カメラ停止
+  // カメラ停止とキャッシュバッファのクリア
   const stopCamera = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setCameraActive(false);
+    stopCameraStream();
     recentFramesRef.current = []; // キャッシュクリア
   };
 
