@@ -759,6 +759,8 @@ html, body {
   padding: 4px;
   border-radius: 12px;
   border: 1px solid var(--border);
+  width: 220px;
+  min-width: 220px;
 }
 .filter-tab-btn {
   flex: 1;

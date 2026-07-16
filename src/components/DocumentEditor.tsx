@@ -429,7 +429,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             <span className="filter-tabs-label">
               画像の回転
             </span>
-            <div className="filter-tabs" style={{ flex: 1, display: 'flex' }}>
+            <div className="filter-tabs">
               <button
                 type="button"
                 onClick={() => handleRotate(false)} // 左90° (CCW)
