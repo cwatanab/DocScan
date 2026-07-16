@@ -15,6 +15,7 @@ export default function App() {
   const [currentCorners, setCurrentCorners] = useState<Point[]>([]);
   const [scannedPages, setScannedPages] = useState<string[]>([]); // 補正済画像のリスト
   const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf'); // エクスポートモードの保存（トグルの状態を反映）
+  const [initialIsWarped, setInitialIsWarped] = useState(false);
 
   // トランジション飛行画像（確定時のアニメーション）用の状態
   const [flyingImage, setFlyingImage] = useState<{
@@ -33,6 +34,7 @@ export default function App() {
   const handleCapture = (imageSrc: string, corners: Point[]) => {
     setCurrentRawImage(imageSrc);
     setCurrentCorners(corners);
+    setInitialIsWarped(false); // 新規撮影時は必ずピン調整から始める
     setStep('edit');
   };
 
@@ -86,6 +88,7 @@ export default function App() {
               setStep('scan'); // スキャン済ページがない場合はカメラに戻る
             }
           }}
+          initialIsWarped={initialIsWarped}
         />
       )}
 
@@ -101,6 +104,7 @@ export default function App() {
           onBackToEdit={() => {
             // 直前に確定したページをやり直すため、配列の末尾から取り除く
             setScannedPages(prev => prev.slice(0, -1));
+            setInitialIsWarped(true); // フィルター適用画面に戻す
             setStep('edit');
           }}
         />

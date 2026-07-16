@@ -8,13 +8,15 @@ interface DocumentEditorProps {
   initialCorners: Point[];
   onSave: (warpedImageSrc: string, filterMode: 'color' | 'document', enableOcr: boolean, rect?: DOMRect | null) => void;
   onCancel: () => void;
+  initialIsWarped?: boolean;
 }
 
 export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   imageSrc,
   initialCorners,
   onSave,
-  onCancel
+  onCancel,
+  initialIsWarped = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -26,7 +28,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [filterMode, setFilterMode] = useState<'color' | 'document'>('document');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
-  const [isWarped, setIsWarped] = useState(false);
+  const [isWarped, setIsWarped] = useState(initialIsWarped);
   const [warpedImage, setWarpedImage] = useState<string | null>(null);
   // ルーペ（拡大鏡）の状態
   const [loupe, setLoupe] = useState<{ x: number; y: number; display: boolean } | null>(null);
@@ -62,6 +64,13 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setCorners(sortPoints(clamped));
     }
   }, [initialCorners, imageSize]);
+
+  // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
+  useEffect(() => {
+    if (initialIsWarped && imageSize.width > 0 && corners.length === 4 && !warpedImage) {
+      handleWarpPreview(false); // 初回自動補正を実行
+    }
+  }, [initialIsWarped, imageSize, corners, warpedImage]);
 
   // 画像読み込み完了時のサイズ取得
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
