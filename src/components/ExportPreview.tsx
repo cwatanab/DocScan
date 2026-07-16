@@ -1,8 +1,16 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Download, Share2, FileText, Loader2, CheckCircle2, Plus } from 'lucide-react';
 import { performOcr } from '../utils/ocrHelper';
 import type { OcrResult } from '../utils/ocrHelper';
 import { createSearchablePdf } from '../utils/pdfHelper';
+import { ZoomableImage } from './ZoomableImage';
+import {
+  getFormattedTimestamp,
+  triggerBlobDownload,
+  convertToPngBlob,
+  convertToJpegBlob,
+  convertToJpegFile
+} from '../utils/imageExportHelper';
 
 interface ExportPreviewProps {
   pages: string[]; // 補正済み画像のDataURL配列
@@ -12,189 +20,6 @@ interface ExportPreviewProps {
   onBackToEdit?: () => void;
 }
 
-// ピンチイン・アウト、ドラッグ(パン)、ダブルタップズームに対応した画像拡大プレビューコンポーネント (画像への直接transform適用 & リスナー範囲限定版)
-const ZoomableImage: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => {
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  
-  // タッチイベントを受け取るための画像コンテナへのRef
-  const contentRef = useRef<HTMLDivElement>(null);
-  
-  // イベントリスナー内で常に最新のState値を参照するためのRef
-  const scaleRef = useRef(1);
-  const positionRef = useRef({ x: 0, y: 0 });
-
-  useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]);
-
-  useEffect(() => {
-    positionRef.current = position;
-  }, [position]);
-
-  // タッチ開始時の状態を保持するRef
-  const touchStartRef = useRef<{
-    distance: number;
-    scale: number;
-    x: number;
-    y: number;
-    posX: number;
-    posY: number;
-    isPinching: boolean;
-  }>({ distance: 0, scale: 1, x: 0, y: 0, posX: 0, posY: 0, isPinching: false });
-
-  const lastTapRef = useRef<number>(0);
-
-  useEffect(() => {
-    const element = contentRef.current;
-    if (!element) return;
-
-    // タッチ開始時の処理
-    const handleTouchStartRaw = (e: TouchEvent) => {
-      const currentScale = scaleRef.current;
-      const currentPos = positionRef.current;
-
-      // ダブルタップ判定 (ダブルタップで拡大/等倍リセット)
-      const now = Date.now();
-      const DOUBLE_TAP_DELAY = 300;
-      if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
-        e.preventDefault();
-        if (currentScale > 1) {
-          setScale(1);
-          setPosition({ x: 0, y: 0 });
-        } else {
-          setScale(2.5);
-          setPosition({ x: 0, y: 0 });
-        }
-        lastTapRef.current = now;
-        return;
-      }
-      lastTapRef.current = now;
-
-      if (e.touches.length === 2) {
-        // 2本指の場合: ピンチズームの初期化
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        
-        touchStartRef.current = {
-          distance: dist > 0 ? dist : 1, // 0除算を防止
-          scale: currentScale,
-          x: (t1.clientX + t2.clientX) / 2,
-          y: (t1.clientY + t2.clientY) / 2,
-          posX: currentPos.x,
-          posY: currentPos.y,
-          isPinching: true
-        };
-      } else if (e.touches.length === 1) {
-        // 1本指の場合: ドラッグ（パン）の初期化
-        const t = e.touches[0];
-        touchStartRef.current = {
-          distance: 0,
-          scale: currentScale,
-          x: t.clientX,
-          y: t.clientY,
-          posX: currentPos.x,
-          posY: currentPos.y,
-          isPinching: false
-        };
-      }
-    };
-
-    // タッチ中のドラッグ・ズーム処理
-    const handleTouchMoveRaw = (e: TouchEvent) => {
-      const currentScale = scaleRef.current;
-
-      if (e.touches.length === 2 && touchStartRef.current.isPinching) {
-        // ピンチズームの計算 (ブラウザ全体のズームを防止)
-        e.preventDefault();
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        
-        const startDist = touchStartRef.current.distance || 1;
-        const factor = dist / startDist;
-        const newScale = Math.max(1, Math.min(5, touchStartRef.current.scale * factor));
-        setScale(newScale);
-      } else if (e.touches.length === 1 && !touchStartRef.current.isPinching && currentScale > 1) {
-        // ドラッグ（パン）の計算 (画像がズームしている時のみパン移動を許可し、背後のスクロールを抑止)
-        e.preventDefault();
-        const t = e.touches[0];
-        const dx = t.clientX - touchStartRef.current.x;
-        const dy = t.clientY - touchStartRef.current.y;
-        
-        setPosition({
-          x: touchStartRef.current.posX + dx,
-          y: touchStartRef.current.posY + dy
-        });
-      }
-    };
-
-    // タッチ終了時の処理
-    const handleTouchEndRaw = () => {
-      const currentScale = scaleRef.current;
-      // ズーム倍率が1以下になったら位置を中央リセットする
-      if (currentScale <= 1) {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
-      }
-    };
-
-    // 画像コンテナに対してのみリスナー登録 (画像外タッチ時の誤入力をカット)
-    element.addEventListener('touchstart', handleTouchStartRaw, { passive: false });
-    element.addEventListener('touchmove', handleTouchMoveRaw, { passive: false });
-    element.addEventListener('touchend', handleTouchEndRaw);
-
-    return () => {
-      element.removeEventListener('touchstart', handleTouchStartRaw);
-      element.removeEventListener('touchmove', handleTouchMoveRaw);
-      element.removeEventListener('touchend', handleTouchEndRaw);
-    };
-  }, []); // 依存配列を空にしてイベントが途切れないように固定
-
-  return (
-    <div className="lightbox-overlay" onClick={onClose}>
-      {/* 閉じるボタンをズーム対象の外側に配置し、スケールの影響を完全にシャットアウト */}
-      <button 
-        className="lightbox-close-btn"
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-      >
-        ✕
-      </button>
-
-      <div 
-        ref={contentRef}
-        className="lightbox-content"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'visible', // 画像がはみ出しても表示されるようにする
-          touchAction: 'none'
-        }}
-      >
-        {/* CSSの影響を受けないよう、画像(imgタグ)自体に対して直接transform(ズーム)を適用する */}
-        <img 
-          src={src} 
-          alt={alt} 
-          className="lightbox-image" 
-          draggable={false}
-          style={{
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
-            transition: scale === 1 && position.x === 0 ? 'transform 0.2s ease-out' : 'none',
-            maxWidth: '100%',
-            maxHeight: '85vh',
-            objectFit: 'contain'
-          }}
-        />
-      </div>
-    </div>
-  );
-};
-
 export const ExportPreview: React.FC<ExportPreviewProps> = ({
   pages,
   exportMode,
@@ -203,7 +28,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   onBackToEdit
 }) => {
   const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({});
-  const [isProcessing, setIsProcessing] = useState(false); // 初期表示はOCRを実行しないため非ローディング
+  const [isProcessing, setIsProcessing] = useState(false);
   const [ocrDone, setOcrDone] = useState(false);
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [activeTab, setActiveTab] = useState<'pdf' | 'text'>('pdf');
@@ -212,75 +37,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   // 拡大プレビュー用のステート
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 撮影日時のタイムスタンプ文字列 (YYYYMMDD_HHMMSS) を生成するヘルパー
-  const getFormattedTimestamp = (): string => {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    return `${yyyy}${mm}${dd}_${hh}${min}${ss}`;
-  };
-
-
-
-  // 画像を256色（インデックスカラー相当）に減色したPNGのBlobに変換する
-  const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          
-          // 256色への均等量子化減色 (R:3bit, G:3bit, B:2bit)
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imgData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            data[i] = Math.round(data[i] / 36) * 36;
-            data[i+1] = Math.round(data[i+1] / 36) * 36;
-            data[i+2] = Math.round(data[i+2] / 85) * 85;
-          }
-          ctx.putImageData(imgData, 0, 0);
-          
-          canvas.toBlob((blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error("PNG blob generation failed"));
-            }
-          }, 'image/png');
-        } else {
-          reject(new Error("Canvas context failed"));
-        }
-      };
-      img.onerror = () => reject(new Error("Image load failed"));
-      img.src = imageSrc;
-    });
-  };
-
-
-
-
-
   // PNGとして保存
-  const handleDownloadPng = async (imageSrc: string, index: number) => {
+  const handleDownloadPng = async (imageSrc: string, index: number, timestamp?: string) => {
     try {
       setIsProcessing(true);
       const blob = await convertToPngBlob(imageSrc);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const ts = timestamp || getFormattedTimestamp();
+      triggerBlobDownload(blob, `SCAN_${ts}_${String(index + 1).padStart(3, '0')}.png`);
     } catch (err) {
       console.error('Failed to convert and download as PNG:', err);
     } finally {
@@ -290,10 +53,11 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
 
   // 全ページをPNGとして順次ダウンロード保存
   const handleDownloadAllPngs = async () => {
+    const timestamp = getFormattedTimestamp(); // バッチ全体でタイムスタンプを統一
     for (let i = 0; i < pages.length; i++) {
       await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          handleDownloadPng(pages[i], i);
+        setTimeout(async () => {
+          await handleDownloadPng(pages[i], i, timestamp);
           resolve();
         }, i * 300); // ブラウザブロック防止のため300msの間隔をあける
       });
@@ -313,7 +77,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           files: [file],
         });
       } else {
-        handleDownloadPng(imageSrc, index);
+        await handleDownloadPng(imageSrc, index);
       }
     } catch (err) {
       console.error("Failed to share single PNG:", err);
@@ -327,9 +91,10 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     try {
       setIsProcessing(true);
       const filesList: File[] = [];
+      const timestamp = getFormattedTimestamp();
       
       for (let i = 0; i < pages.length; i++) {
-        const fileName = `SCAN_${getFormattedTimestamp()}_${String(i + 1).padStart(3, '0')}.png`;
+        const fileName = `SCAN_${timestamp}_${String(i + 1).padStart(3, '0')}.png`;
         const blob = await convertToPngBlob(pages[i]);
         const file = new File([blob], fileName, { type: 'image/png' });
         filesList.push(file);
@@ -342,7 +107,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           files: filesList,
         });
       } else {
-        handleDownloadAllPngs();
+        await handleDownloadAllPngs();
       }
     } catch (err: any) {
       setIsProcessing(false);
@@ -351,7 +116,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         return;
       }
       console.error("Failed to share PNGs:", err);
-      handleDownloadAllPngs();
+      await handleDownloadAllPngs();
     }
   };
 
@@ -396,86 +161,37 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   const handleDownloadPdf = async () => {
     const blob = await ensurePdfGenerated();
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `SCAN_${getFormattedTimestamp()}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // DataURL画像(PNG等)を JPEG の File オブジェクトに変換するヘルパー
-  const convertToJpegFile = async (imageSrc: string, filename: string): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          canvas.toBlob((blob) => {
-            if (blob) {
-              const file = new File([blob], filename, { type: 'image/jpeg' });
-              resolve(file);
-            } else {
-              reject(new Error("Blob generation failed"));
-            }
-          }, 'image/jpeg', 0.95);
-        } else {
-          reject(new Error("Canvas context failed"));
-        }
-      };
-      img.onerror = () => reject(new Error("Image load failed"));
-      img.src = imageSrc;
-    });
+    triggerBlobDownload(blob, `SCAN_${getFormattedTimestamp()}.pdf`);
   };
 
   // JPEG(画像)として保存
-  const handleDownloadJpeg = async (imageSrc: string, index: number) => {
+  const handleDownloadJpeg = async (imageSrc: string, index: number, timestamp?: string) => {
+    const ts = timestamp || getFormattedTimestamp();
     try {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          
-          // 画質 95% の JPEG としてエンコード
-          const outputUrl = canvas.toDataURL('image/jpeg', 0.95);
-          
-          const a = document.createElement('a');
-          a.href = outputUrl;
-          a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
-      };
-      img.src = imageSrc;
+      setIsProcessing(true);
+      const blob = await convertToJpegBlob(imageSrc);
+      triggerBlobDownload(blob, `SCAN_${ts}_${String(index + 1).padStart(3, '0')}.jpg`);
     } catch (err) {
       console.error('Failed to convert and download as JPEG:', err);
       // 失敗時のフォールバック (そのままダウンロード)
       const a = document.createElement('a');
       a.href = imageSrc;
-      a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
+      a.download = `SCAN_${ts}_${String(index + 1).padStart(3, '0')}.jpg`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   // 全ページをJPEGとして順次ダウンロード保存
   const handleDownloadAllJpegs = async () => {
+    const timestamp = getFormattedTimestamp(); // バッチ全体でタイムスタンプを統一
     for (let i = 0; i < pages.length; i++) {
       await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          handleDownloadJpeg(pages[i], i);
+        setTimeout(async () => {
+          await handleDownloadJpeg(pages[i], i, timestamp);
           resolve();
         }, i * 300); // ブラウザブロック防止のため300msの間隔をあける
       });
@@ -485,6 +201,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   // 個別JPEGの共有
   const handleShareSingleJpeg = async (imageSrc: string, index: number) => {
     try {
+      setIsProcessing(true);
       const fileName = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.jpg`;
       const file = await convertToJpegFile(imageSrc, fileName);
       
@@ -493,7 +210,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           files: [file],
         });
       } else {
-        handleDownloadJpeg(imageSrc, index);
+        await handleDownloadJpeg(imageSrc, index);
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -501,7 +218,9 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         return;
       }
       console.error("Failed to share single JPEG:", err);
-      handleDownloadJpeg(imageSrc, index);
+      await handleDownloadJpeg(imageSrc, index);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -510,9 +229,10 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     try {
       setIsProcessing(true);
       const filesList: File[] = [];
+      const timestamp = getFormattedTimestamp();
       
       for (let i = 0; i < pages.length; i++) {
-        const fileName = `SCAN_${getFormattedTimestamp()}_${String(i + 1).padStart(3, '0')}.jpg`;
+        const fileName = `SCAN_${timestamp}_${String(i + 1).padStart(3, '0')}.jpg`;
         const file = await convertToJpegFile(pages[i], fileName);
         filesList.push(file);
       }
@@ -524,7 +244,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           files: filesList,
         });
       } else {
-        handleDownloadAllJpegs();
+        await handleDownloadAllJpegs();
       }
     } catch (err: any) {
       setIsProcessing(false);
@@ -533,7 +253,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         return;
       }
       console.error("Failed to share JPEGs:", err);
-      handleDownloadAllJpegs();
+      await handleDownloadAllJpegs();
     }
   };
 
@@ -556,14 +276,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         }
       }
     } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, fileName);
     }
   };
 

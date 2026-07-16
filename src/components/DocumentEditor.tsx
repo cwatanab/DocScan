@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
-import { sortPoints, warpImage, applyFilter, rotateImage90, detectOptimalFilter } from '../utils/opencvHelper';
+import { warpImage, rotateImage90, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
+import { useCropHandles } from './useCropHandles';
 
 interface DocumentEditorProps {
   imageSrc: string;
@@ -20,20 +21,31 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewImageRef = useRef<HTMLImageElement>(null);
   
-  const [corners, setCorners] = useState<Point[]>([]);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [filterMode, setFilterMode] = useState<'color' | 'document'>('document');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
   const [isWarped, setIsWarped] = useState(initialIsWarped);
   const [warpedImage, setWarpedImage] = useState<string | null>(null);
-  // ルーペ（拡大鏡）の状態
-  const [loupe, setLoupe] = useState<{ x: number; y: number; display: boolean } | null>(null);
-  const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
   const [enableOcr, setEnableOcr] = useState(false); // OCR実行のトグルステート (デフォルトOFF)
+
+  // カスタムフックを呼び出して、ピンのドラッグと拡大ルーペのロジックを一括委譲
+  const {
+    corners,
+    draggedIndex,
+    loupe,
+    loupeCanvasRef,
+    toDisplayPoint,
+    handleStart,
+    handleMove,
+    handleEnd
+  } = useCropHandles({
+    initialCorners,
+    imageSize,
+    displaySize,
+    imageRef
+  });
 
   // 90度回転処理 (補正後の画像を回転。左右指定可能)
   const handleRotate = (clockwise: boolean = true) => {
@@ -53,17 +65,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     };
     img.src = warpedImage;
   };
-
-  // 初期の4隅の設定（画像の大きさが確定した段階で、安全に範囲内にクランプしてセットする）
-  useEffect(() => {
-    if (initialCorners && initialCorners.length === 4 && imageSize.width > 0 && imageSize.height > 0) {
-      const clamped = initialCorners.map(pt => ({
-        x: Math.max(0, Math.min(pt.x, imageSize.width)),
-        y: Math.max(0, Math.min(pt.y, imageSize.height))
-      }));
-      setCorners(sortPoints(clamped));
-    }
-  }, [initialCorners, imageSize]);
 
   // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
   useEffect(() => {
@@ -95,113 +96,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     return () => window.removeEventListener('resize', updateDisplaySize);
   }, []);
 
-  // 座標変換: 原寸大画像座標 -> 画面表示座標
-  const toDisplayPoint = (pt: Point): Point => {
-    if (imageSize.width === 0 || displaySize.width === 0) return { x: 0, y: 0 };
-    return {
-      x: (pt.x / imageSize.width) * displaySize.width,
-      y: (pt.y / imageSize.height) * displaySize.height
-    };
-  };
-
-  // 座標変換: 画面表示座標 -> 原寸大画像座標
-  const toImagePoint = (x: number, y: number): Point => {
-    if (displaySize.width === 0) return { x: 0, y: 0 };
-    return {
-      x: Math.max(0, Math.min((x / displaySize.width) * imageSize.width, imageSize.width)),
-      y: Math.max(0, Math.min((y / displaySize.height) * imageSize.height, imageSize.height))
-    };
-  };
-
-  // ドラッグ開始
-  const handleStart = (index: number) => {
-    setDraggedIndex(index);
-  };
-
-  // ドラッグ中・移動
-  const handleMove = (clientX: number, clientY: number) => {
-    if (draggedIndex === null || !imageRef.current || !canvasRef.current) return;
-
-    const rect = imageRef.current.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-
-    const boundedX = Math.max(0, Math.min(x, displaySize.width));
-    const boundedY = Math.max(0, Math.min(y, displaySize.height));
-
-    const newImagePoint = toImagePoint(boundedX, boundedY);
-
-    setCorners(prev => {
-      const next = [...prev];
-      next[draggedIndex] = newImagePoint;
-      return next;
-    });
-
-    setLoupe({
-      x: boundedX,
-      y: boundedY,
-      display: true
-    });
-
-    drawLoupe(newImagePoint);
-  };
-
-  // ルーペ（拡大鏡）のキャンバス描画
-  const drawLoupe = (imgPt: Point) => {
-    const loupeCanvas = loupeCanvasRef.current;
-    if (!loupeCanvas || !imageRef.current) return;
-    const ctx = loupeCanvas.getContext('2d');
-    if (!ctx) return;
-
-    // Retina/高解像度対応のため、実ピクセルサイズは300px（CSSで150pxに縮小）
-    const size = 300;
-    loupeCanvas.width = size;
-    loupeCanvas.height = size;
-
-    ctx.clearRect(0, 0, size, size);
-
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.clip();
-
-    // 切り取り元のサイズ (180pxを300pxに拡大＝約1.66倍拡大。拡大率を抑えて周囲の状況を把握しやすくする)
-    const sourceSize = 180;
-    ctx.drawImage(
-      imageRef.current,
-      imgPt.x - sourceSize / 2,
-      imgPt.y - sourceSize / 2,
-      sourceSize,
-      sourceSize,
-      0,
-      0,
-      size,
-      size
-    );
-
-    // 十字線の描画
-    ctx.strokeStyle = '#10b981';
-    ctx.lineWidth = 4; // 太くして見やすく
-    ctx.beginPath();
-    ctx.moveTo(size / 2, 0);
-    ctx.lineTo(size / 2, size);
-    ctx.moveTo(0, size / 2);
-    ctx.lineTo(size, size / 2);
-    ctx.stroke();
-
-    // 白い外枠の描画
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 8; // 太くして見やすく
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
-    ctx.stroke();
-  };
-
-  // ドラッグ終了
-  const handleEnd = () => {
-    setDraggedIndex(null);
-    setLoupe(null);
-  };
-
   const handleTouchMove = (e: React.TouchEvent) => {
     if (draggedIndex === null) return;
     const touch = e.touches[0];
@@ -215,27 +109,27 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   // 台形補正のプレビュー実行
   const handleWarpPreview = (autoDetectFilter: boolean = false) => {
-    if (corners.length !== 4) return;
+    if (corners.length !== 4 || !imageRef.current) return;
 
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = imageSize.width;
-    tempCanvas.height = imageSize.height;
-    const ctx = tempCanvas.getContext('2d');
-    
-    if (ctx && imageRef.current) {
-      ctx.drawImage(imageRef.current, 0, 0);
-      const warpedCanvas = warpImage(tempCanvas, corners);
+    let targetFilterMode = filterMode;
+
+    if (autoDetectFilter) {
+      // 一時的な台形補正を行い、最適なフィルターモードを自動判定する
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = imageSize.width;
+      tempCanvas.height = imageSize.height;
+      const ctx = tempCanvas.getContext('2d');
       
-      let targetFilterMode = filterMode;
-      
-      if (autoDetectFilter) {
-        // 画像の色彩や標準偏差から、最適なフィルターモードを自動判定
+      if (ctx) {
+        ctx.drawImage(imageRef.current, 0, 0);
+        const warpedCanvas = warpImage(tempCanvas, corners);
         targetFilterMode = detectOptimalFilter(warpedCanvas);
         setFilterMode(targetFilterMode); // UIの選択状態を更新
       }
-      
-      const filteredCanvas = applyFilter(warpedCanvas, targetFilterMode);
-      const url = filteredCanvas.toDataURL('image/jpeg', 0.95);
+    }
+    
+    const url = processWarpAndFilter(imageRef.current, corners, targetFilterMode);
+    if (url) {
       setWarpedImage(url);
       setIsWarped(true);
     }
@@ -257,22 +151,13 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
     if (warpedImage) {
       onSave(warpedImage, filterMode, enableOcr, rect);
-    } else {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = imageSize.width;
-      tempCanvas.height = imageSize.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (ctx && imageRef.current) {
-        ctx.drawImage(imageRef.current, 0, 0);
-        const warpedCanvas = warpImage(tempCanvas, corners);
-        const filteredCanvas = applyFilter(warpedCanvas, filterMode);
-        const url = filteredCanvas.toDataURL('image/jpeg', 0.95);
+    } else if (imageRef.current) {
+      const url = processWarpAndFilter(imageRef.current, corners, filterMode);
+      if (url) {
         onSave(url, filterMode, enableOcr, rect);
       }
     }
   };
-
-
 
   return (
     <div className="editor-container"
@@ -381,7 +266,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             })}
 
             {/* ルーペ (拡大鏡) ポップアップ */}
-            {loupe && loupe.display && (
+            {loupe && (
               <div
                 className="loupe-popup"
                 style={{
@@ -399,9 +284,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               </div>
             )}
           </div>
-          
-          {/* 一時キャンバス */}
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
 
       {/* 下部コントロールエリア (フィルタ適用モードの時のみフッターパネルを表示) */}

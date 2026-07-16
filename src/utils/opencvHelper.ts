@@ -561,3 +561,25 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
   return 'document';
 }
 
+/**
+ * 画像エレメントと4角の頂点、フィルタモードを指定し、台形補正とフィルタ処理を行った結果のDataURLを生成する
+ */
+export function processWarpAndFilter(
+  imageEl: HTMLImageElement,
+  corners: Point[],
+  filterMode: 'color' | 'document'
+): string | null {
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = imageEl.naturalWidth || imageEl.width;
+  tempCanvas.height = imageEl.naturalHeight || imageEl.height;
+  const ctx = tempCanvas.getContext('2d');
+  
+  if (ctx) {
+    ctx.drawImage(imageEl, 0, 0);
+    const warpedCanvas = warpImage(tempCanvas, corners);
+    const filteredCanvas = applyFilter(warpedCanvas, filterMode);
+    return filteredCanvas.toDataURL('image/jpeg', 0.95);
+  }
+  return null;
+}
+
