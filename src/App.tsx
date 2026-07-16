@@ -1,90 +1,27 @@
-import { useState } from 'react';
 import { CameraScanner } from './components/CameraScanner';
 import { DocumentEditor } from './components/DocumentEditor';
 import { ExportPreview } from './components/ExportPreview';
-import type { Point } from './utils/opencvHelper';
-import { performOcr } from './utils/ocrHelper';
-import type { OcrResult } from './utils/ocrHelper';
+import { useScanSession } from './utils/useScanSession';
 import { Loader2 } from 'lucide-react';
 
-type Step = 'scan' | 'edit' | 'export';
-
 export default function App() {
-  // アプリ起動時の画面を「カメラスキャン画面（scan）」に設定
-  const [step, setStep] = useState<Step>('scan');
-  
-  // スキャン中のセッション状態
-  const [currentRawImage, setCurrentRawImage] = useState<string | null>(null);
-  const [currentCorners, setCurrentCorners] = useState<Point[]>([]);
-  const [scannedPages, setScannedPages] = useState<string[]>([]); // 補正済画像のリスト
-  const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({}); // OCR結果のセッション管理
-  const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf'); // エクスポートモードの保存（トグルの状態を反映）
-  const [initialIsWarped, setInitialIsWarped] = useState(false);
-  const [isOcrLoading, setIsOcrLoading] = useState(false); // OCR実行中の画面ロック
-
-  // トランジション飛行画像（確定時のアニメーション）用の状態
-  const [flyingImage, setFlyingImage] = useState<{
-    src: string;
-    rect: DOMRect;
-  } | null>(null);
-
-  // 新規スキャン開始 (セッションリセット)
-  const handleStartNewScan = () => {
-    setScannedPages([]);
-    setOcrResults({});
-    setCurrentRawImage(null);
-    setStep('scan');
-  };
-
-  // 画像キャプチャ完了
-  const handleCapture = (imageSrc: string, corners: Point[]) => {
-    setCurrentRawImage(imageSrc);
-    setCurrentCorners(corners);
-    setInitialIsWarped(false); // 新規撮影時は必ずピン調整から始める
-    setStep('edit');
-  };
-
-  // 編集完了（台形補正・フィルタ適用済み）
-  const handleSavePage = async (
-    warpedImageSrc: string,
-    _filterMode: 'color' | 'document',
-    enableOcr: boolean,
-    rect?: DOMRect | null
-  ) => {
-    setExportMode(enableOcr ? 'pdf' : 'jpeg');
-
-    if (rect) {
-      setFlyingImage({
-        src: warpedImageSrc,
-        rect
-      });
-      // 0.65秒後に飛行画像をフェードアウトさせてクリア
-      setTimeout(() => {
-        setFlyingImage(null);
-      }, 650);
-    }
-
-    if (enableOcr) {
-      setIsOcrLoading(true);
-      try {
-        const index = scannedPages.length;
-        const ocrResult = await performOcr(warpedImageSrc);
-        setOcrResults(prev => ({ ...prev, [index]: ocrResult }));
-      } catch (err) {
-        console.error("OCR failed during handleSavePage:", err);
-      } finally {
-        setIsOcrLoading(false);
-      }
-    }
-    
-    setScannedPages(prev => [...prev, warpedImageSrc]);
-    setStep('export'); // 確定後はダイアログを挟まず、即座にエクスポート画面に進む
-  };
-
-  // エクスポート完了 (一時メモリをクリアし、即座に最初のカメラスキャン画面に戻る)
-  const handleExportComplete = () => {
-    handleStartNewScan();
-  };
+  const {
+    step,
+    currentRawImage,
+    currentCorners,
+    scannedPages,
+    ocrResults,
+    exportMode,
+    initialIsWarped,
+    isOcrLoading,
+    flyingImage,
+    capture,
+    savePage,
+    cancelEdit,
+    exportComplete,
+    backToScanner,
+    backToEdit
+  } = useScanSession();
 
   return (
     <div className="app-layout">
@@ -100,7 +37,7 @@ export default function App() {
 
       {step === 'scan' && (
         <CameraScanner
-          onCapture={handleCapture}
+          onCapture={capture}
         />
       )}
 
@@ -108,15 +45,8 @@ export default function App() {
         <DocumentEditor
           imageSrc={currentRawImage}
           initialCorners={currentCorners}
-          onSave={handleSavePage}
-          onCancel={() => {
-            setCurrentRawImage(null); // 一時生画像のキャッシュのみクリア
-            if (scannedPages.length > 0) {
-              setStep('export'); // スキャン済ページがある場合はエクスポートプレビューに戻る
-            } else {
-              setStep('scan'); // スキャン済ページがない場合はカメラに戻る
-            }
-          }}
+          onSave={savePage}
+          onCancel={cancelEdit}
           initialIsWarped={initialIsWarped}
         />
       )}
@@ -126,22 +56,9 @@ export default function App() {
           pages={scannedPages}
           exportMode={exportMode}
           ocrResults={ocrResults}
-          onComplete={handleExportComplete}
-          onBackToScanner={() => {
-            setCurrentRawImage(null); // 再撮影用に一時生画像キャッシュをクリア
-            setStep('scan');
-          }}
-          onBackToEdit={() => {
-            // 直前に確定したページとOCR結果をやり直すため、配列の末尾から取り除く
-            setOcrResults(prev => {
-              const next = { ...prev };
-              delete next[scannedPages.length - 1];
-              return next;
-            });
-            setScannedPages(prev => prev.slice(0, -1));
-            setInitialIsWarped(true); // フィルター適用画面に戻す
-            setStep('edit');
-          }}
+          onComplete={exportComplete}
+          onBackToScanner={backToScanner}
+          onBackToEdit={backToEdit}
         />
       )}
 
@@ -166,3 +83,4 @@ export default function App() {
     </div>
   );
 }
+

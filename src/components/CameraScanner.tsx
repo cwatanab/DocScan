@@ -83,8 +83,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     let lastDetectionTime = 0;
     let lastFocusScoreTime = 0;
     let cachedCorners: Point[] | null = null;
-    const DETECTION_INTERVAL = 150; // 150ms ごとに輪郭検出を行い、表示のチカチカを抑止
-    const FOCUS_BUFFER_INTERVAL = 50; // 50ms ごとにピントスコアを計測し、超高密度にバッファリングする
+    let lastValidCorners: Point[] | null = null;
+    let smoothCorners: Point[] | null = null;
+    let lastSeenDetectionTime = 0;
+
+    const DETECTION_INTERVAL = 150; // 150ms ごとに輪郭検出を行う
+    const FOCUS_BUFFER_INTERVAL = 50; // 50ms ごとにピントスコアを計測する
+    const CORNER_KEEP_DURATION = 350; // 検出が途切れても 350ms は枠線を維持する
+    const SMOOTHING_FACTOR = 0.22; // 指数移動平均の平滑化係数
 
     const processFrame = () => {
       if (video.paused || video.ended) return;
@@ -101,21 +107,64 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         }
 
         if (ctx) {
-          // 生のカメラ映像を描画
+          // 生のカメラ映像を描画する
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
           const now = performance.now();
           
           // 1. ドキュメントの輪郭検出 (計算負荷を考慮し 150ms 間隔で間引き)
           if (now - lastDetectionTime > DETECTION_INTERVAL) {
-            cachedCorners = detectDocument(canvas);
+            const detected = detectDocument(canvas);
+            if (detected) {
+              cachedCorners = detected;
+              lastValidCorners = detected;
+              lastSeenDetectionTime = now;
+            } else {
+              cachedCorners = null;
+            }
             lastDetectionTime = now;
           }
 
-          // 2. ピントの計測と高解像度フレームのキャッシュ蓄積 (50ms 間隔で高密度追尾)
-          if (cachedCorners && (now - lastFocusScoreTime > FOCUS_BUFFER_INTERVAL)) {
+          // 2. 枠線の状態維持とジッター平滑化の計算
+          let targetCorners: Point[] | null = null;
+          if (cachedCorners) {
+            targetCorners = cachedCorners;
+          } else if (lastValidCorners && (now - lastSeenDetectionTime < CORNER_KEEP_DURATION)) {
+            // 検出が一時的に途切れた場合は前回の検出枠線を使用する
+            targetCorners = lastValidCorners;
+          } else {
+            smoothCorners = null;
+          }
+
+          if (targetCorners) {
+            if (!smoothCorners) {
+              smoothCorners = targetCorners;
+            } else {
+              // 座標の急激な変化（カメラ移動など）を検知する
+              let totalDist = 0;
+              for (let i = 0; i < 4; i++) {
+                totalDist += Math.hypot(targetCorners[i].x - smoothCorners[i].x, targetCorners[i].y - smoothCorners[i].y);
+              }
+              const avgDist = totalDist / 4;
+              
+              // 平均移動距離が画像の長辺の12%を超えていたら即時追従させる
+              const resetThreshold = Math.max(canvas.width, canvas.height) * 0.12;
+              if (avgDist > resetThreshold) {
+                smoothCorners = targetCorners;
+              } else {
+                // 指数移動平均による平滑化を適用する
+                smoothCorners = smoothCorners.map((pt, idx) => ({
+                  x: pt.x + (targetCorners![idx].x - pt.x) * SMOOTHING_FACTOR,
+                  y: pt.y + (targetCorners![idx].y - pt.y) * SMOOTHING_FACTOR
+                }));
+              }
+            }
+          }
+
+          // 3. ピントの計測と高解像度フレームのキャッシュ蓄積
+          if (smoothCorners && (now - lastFocusScoreTime > FOCUS_BUFFER_INTERVAL)) {
             try {
-              // OpenCVの計算負荷を最小化するため、ピント計測用には 300px の超軽量キャンバスを使用する (ピクセル数を97.5%削減)
+              // ピント計測用には 300px の超軽量キャンバスを使用する
               const smallCanvas = resizeCanvas(canvas, 300);
               const score = calculateFocusScore(smallCanvas);
               
@@ -125,7 +174,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
               // 縮小サイズに合わせて頂点座標もスケールする
               const scaleX = tempCanvas.width / canvas.width;
               const scaleY = tempCanvas.height / canvas.height;
-              const scaledCorners = cachedCorners.map(pt => ({
+              const scaledCorners = smoothCorners.map(pt => ({
                 x: pt.x * scaleX,
                 y: pt.y * scaleY
               }));
@@ -136,7 +185,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 score
               });
 
-              // 直近 8フレーム (約0.4秒分) にキャッシュを拡張し、ブレる前の最良画像が選ばれる確率を向上
+              // 直近 8フレーム (約0.4秒分) にキャッシュを制限する
               if (recentFramesRef.current.length > 8) {
                 recentFramesRef.current.shift();
               }
@@ -152,22 +201,22 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         if (oCtx && overlayCanvas) {
           oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-          if (cachedCorners) {
+          if (smoothCorners) {
             oCtx.strokeStyle = '#10b981';
             oCtx.lineWidth = 6;
             oCtx.fillStyle = 'rgba(16, 185, 129, 0.15)';
             
             oCtx.beginPath();
-            oCtx.moveTo(cachedCorners[0].x, cachedCorners[0].y);
-            oCtx.lineTo(cachedCorners[1].x, cachedCorners[1].y);
-            oCtx.lineTo(cachedCorners[2].x, cachedCorners[2].y);
-            oCtx.lineTo(cachedCorners[3].x, cachedCorners[3].y);
+            oCtx.moveTo(smoothCorners[0].x, smoothCorners[0].y);
+            oCtx.lineTo(smoothCorners[1].x, smoothCorners[1].y);
+            oCtx.lineTo(smoothCorners[2].x, smoothCorners[2].y);
+            oCtx.lineTo(smoothCorners[3].x, smoothCorners[3].y);
             oCtx.closePath();
             oCtx.stroke();
             oCtx.fill();
 
             oCtx.fillStyle = '#ffffff';
-            cachedCorners.forEach(pt => {
+            smoothCorners.forEach(pt => {
               oCtx.beginPath();
               oCtx.arc(pt.x, pt.y, 12, 0, 2 * Math.PI);
               oCtx.fill();

@@ -64,15 +64,22 @@ export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = img.width;
+      tempCanvas.height = img.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) {
+        reject(new Error("Canvas context failed"));
+        return;
+      }
+      tempCtx.drawImage(img, 0, 0);
+      
+      // メモリー削減とフリーズ防止、共有準備遅延の解消のため1920pxにリサイズ
+      const canvas = resizeCanvas(tempCanvas, 1920);
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        
         // 【必須仕様】8bit/256色への均等量子化減色 (R:3bit, G:3bit, B:2bit)
-        // 激しい等高線状のブロックノイズ（バンディング）を抑制するため、確率的ディザリングを適用
+        // 激しい等高線状 of ブロックノイズ（バンディング）を抑制するため、確率的ディザリングを適用
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
         for (let i = 0; i < data.length; i += 4) {
@@ -109,12 +116,20 @@ export const convertToJpegBlob = async (imageSrc: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = img.width;
+      tempCanvas.height = img.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) {
+        reject(new Error("Canvas context failed"));
+        return;
+      }
+      tempCtx.drawImage(img, 0, 0);
+
+      // メモリー削減とフリーズ防止、共有準備遅延の解消のため1920pxにリサイズ
+      const canvas = resizeCanvas(tempCanvas, 1920);
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(img, 0, 0);
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(blob);

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Share2, Loader2, Plus } from 'lucide-react';
+import { Download, Share2, Loader2 } from 'lucide-react';
 import type { OcrResult } from '../utils/ocrHelper';
 import { createSearchablePdf } from '../utils/pdfHelper';
 import { ZoomableImage } from './ZoomableImage';
+import { ThumbnailGrid } from './ThumbnailGrid';
 import {
   getFormattedTimestamp,
   triggerBlobDownload,
@@ -283,71 +284,15 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           <div style={{ width: '100%', maxWidth: '360px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
             {/* 各ページのサムネイル */}
-            <div className="thumbnail-grid">
-              {pages.map((page, idx) => (
-                <div 
-                  key={idx} 
-                  className="thumbnail-card"
-                  onClick={() => setPreviewImage(page)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <img
-                    src={page}
-                    alt={`Page ${idx + 1}`}
-                    className="thumbnail-card-img"
-                  />
-                  <div className="thumbnail-card-bar">
-                    <span className="thumbnail-card-title">
-                      P {idx + 1}
-                    </span>
-                    <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
-                      {/* JPEG 共有/保存 */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleShareSingleJpeg(page, idx); }}
-                        className="thumbnail-card-download"
-                        style={{ backgroundColor: '#4f46e5', width: '22px', height: '22px', padding: '0' }}
-                        title="JPEGを共有"
-                      >
-                        <Share2 style={{ width: '10px', height: '10px' }} />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDownloadJpeg(page, idx); }}
-                        className="thumbnail-card-download"
-                        style={{ backgroundColor: '#334155', width: '22px', height: '22px', padding: '0' }}
-                        title="JPEG保存"
-                      >
-                        <Download style={{ width: '10px', height: '10px' }} />
-                      </button>
-                      {/* PNG 共有/保存 */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleShareSinglePng(page, idx); }}
-                        className="thumbnail-card-download"
-                        style={{ backgroundColor: '#10b981', width: '22px', height: '22px', padding: '0' }}
-                        title="PNGを共有"
-                      >
-                        <Share2 style={{ width: '10px', height: '10px', color: '#fff' }} />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDownloadPng(page, idx); }}
-                        className="thumbnail-card-download"
-                        style={{ backgroundColor: '#0f172a', width: '22px', height: '22px', padding: '0', border: '1px solid #334155' }}
-                        title="PNG保存"
-                      >
-                        <Download style={{ width: '10px', height: '10px', color: '#fff' }} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {/* ページ追加用の点線アクションカード */}
-              <div 
-                onClick={onBackToScanner} 
-                className="thumbnail-card add-page-card"
-              >
-                <Plus style={{ width: '22px', height: '22px', color: '#6366f1', marginBottom: '8px' }} />
-                <span style={{ fontSize: '11px', fontWeight: '700', color: '#cbd5e1' }}>ページ追加</span>
-              </div>
-            </div>
+            <ThumbnailGrid
+              pages={pages}
+              onPageClick={setPreviewImage}
+              onBackToScanner={onBackToScanner}
+              onShareSingleJpeg={handleShareSingleJpeg}
+              onDownloadJpeg={handleDownloadJpeg}
+              onShareSinglePng={handleShareSinglePng}
+              onDownloadPng={handleDownloadPng}
+            />
           </div>
         ) : (
           /* OCR テキスト表示 */

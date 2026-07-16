@@ -12,6 +12,7 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt, onClose 
   
   // タッチイベントを受け取るための画像コンテナへのRef
   const contentRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   
   // イベントリスナー内で常に最新のState値を参照するためのRef
   const scaleRef = useRef(1);
@@ -25,27 +26,110 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt, onClose 
     positionRef.current = position;
   }, [position]);
 
-  // タッチ開始時の状態を保持するRef
-  const touchStartRef = useRef<{
+  // タッチの直前の状態を保持するRef
+  const lastTouchRef = useRef<{
+    clientX: number;
+    clientY: number;
     distance: number;
-    scale: number;
-    x: number;
-    y: number;
-    posX: number;
-    posY: number;
-    isPinching: boolean;
-  }>({ distance: 0, scale: 1, x: 0, y: 0, posX: 0, posY: 0, isPinching: false });
+  }>({ clientX: 0, clientY: 0, distance: 0 });
 
   const lastTapRef = useRef<number>(0);
+
+  // 画像のコンテナ内での実際の描画サイズを計算する
+  const getImageRenderSize = (scaleVal: number) => {
+    const img = imgRef.current;
+    const container = contentRef.current;
+    if (!img || !container) return { width: 0, height: 0, containerWidth: 0, containerHeight: 0 };
+
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    // 画像の元のサイズ（アスペクト比計算用）
+    const naturalWidth = img.naturalWidth || img.width || 1;
+    const naturalHeight = img.naturalHeight || img.height || 1;
+    
+    const imgRatio = naturalWidth / naturalHeight;
+    const containerRatio = containerWidth / containerHeight;
+
+    let renderWidth = containerWidth;
+    let renderHeight = containerHeight;
+
+    // object-fit: contain の挙動をシミュレート
+    if (imgRatio > containerRatio) {
+      renderWidth = containerWidth;
+      renderHeight = containerWidth / imgRatio;
+    } else {
+      renderHeight = containerHeight;
+      renderWidth = containerHeight * imgRatio;
+    }
+
+    return {
+      width: renderWidth * scaleVal,
+      height: renderHeight * scaleVal,
+      containerWidth,
+      containerHeight
+    };
+  };
+
+  // 画像の移動範囲を制限する（はみ出し防止）
+  const getBoundedPosition = (x: number, y: number, currentScale: number) => {
+    const { width, height, containerWidth, containerHeight } = getImageRenderSize(currentScale);
+    if (width === 0 || height === 0) return { x, y };
+
+    let minX = 0;
+    let maxX = 0;
+    let minY = 0;
+    let maxY = 0;
+
+    // 幅が画面幅より大きければ、はみ出した分だけ移動可能にする
+    if (width > containerWidth) {
+      maxX = (width - containerWidth) / 2;
+      minX = -maxX;
+    }
+
+    // 高さが画面高さより大きければ、はみ出した分だけ移動可能にする
+    if (height > containerHeight) {
+      maxY = (height - containerHeight) / 2;
+      minY = -maxY;
+    }
+
+    return {
+      x: Math.max(minX, Math.min(maxX, x)),
+      y: Math.max(minY, Math.min(maxY, y))
+    };
+  };
 
   useEffect(() => {
     const element = contentRef.current;
     if (!element) return;
 
+    // 指が画面に触れたとき、または離れたときに基準位置を再取得する
+    const updateTouchPoints = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const clientX = (t1.clientX + t2.clientX) / 2;
+        const clientY = (t1.clientY + t2.clientY) / 2;
+        
+        lastTouchRef.current = {
+          clientX,
+          clientY,
+          distance: dist > 0 ? dist : 1,
+        };
+      } else if (e.touches.length === 1) {
+        const t = e.touches[0];
+        lastTouchRef.current = {
+          clientX: t.clientX,
+          clientY: t.clientY,
+          distance: 0,
+        };
+      }
+    };
+
     // タッチ開始時の処理
     const handleTouchStartRaw = (e: TouchEvent) => {
       const currentScale = scaleRef.current;
-      const currentPos = positionRef.current;
 
       // ダブルタップ判定 (ダブルタップで拡大/等倍リセット)
       const now = Date.now();
@@ -56,80 +140,118 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt, onClose 
           setScale(1);
           setPosition({ x: 0, y: 0 });
         } else {
-          setScale(2.5);
-          setPosition({ x: 0, y: 0 });
+          // ダブルタップされた座標を取得して、そこを中心に拡大
+          const rect = element.getBoundingClientRect();
+          const touch = e.touches[0] || e.changedTouches[0];
+          const pivotX = touch.clientX - rect.left - rect.width / 2;
+          const pivotY = touch.clientY - rect.top - rect.height / 2;
+          
+          const newScale = 2.5;
+          const newPos = getBoundedPosition(
+            pivotX * (1 - newScale),
+            pivotY * (1 - newScale),
+            newScale
+          );
+          
+          setScale(newScale);
+          setPosition(newPos);
         }
         lastTapRef.current = now;
         return;
       }
       lastTapRef.current = now;
 
-      if (e.touches.length === 2) {
-        // 2本指の場合: ピンチズームの初期化
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        
-        touchStartRef.current = {
-          distance: dist > 0 ? dist : 1, // 0除算を防止
-          scale: currentScale,
-          x: (t1.clientX + t2.clientX) / 2,
-          y: (t1.clientY + t2.clientY) / 2,
-          posX: currentPos.x,
-          posY: currentPos.y,
-          isPinching: true
-        };
-      } else if (e.touches.length === 1) {
-        // 1本指の場合: ドラッグ（パン）の初期化
-        const t = e.touches[0];
-        touchStartRef.current = {
-          distance: 0,
-          scale: currentScale,
-          x: t.clientX,
-          y: t.clientY,
-          posX: currentPos.x,
-          posY: currentPos.y,
-          isPinching: false
-        };
-      }
+      // タッチ開始時の最新位置を基準点として記録
+      updateTouchPoints(e);
     };
 
     // タッチ中のドラッグ・ズーム処理
     const handleTouchMoveRaw = (e: TouchEvent) => {
       const currentScale = scaleRef.current;
+      const currentPos = positionRef.current;
+      const rect = element.getBoundingClientRect();
 
-      if (e.touches.length === 2 && touchStartRef.current.isPinching) {
-        // ピンチズームの計算 (ブラウザ全体のズームを防止)
+      if (e.touches.length === 2) {
+        // ピンチズーム（ブラウザ全体のズームを防止）
         e.preventDefault();
+        
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        
-        const startDist = touchStartRef.current.distance || 1;
+        const clientX = (t1.clientX + t2.clientX) / 2;
+        const clientY = (t1.clientY + t2.clientY) / 2;
+
+        const startDist = lastTouchRef.current.distance || 1;
         const factor = dist / startDist;
-        const newScale = Math.max(1, Math.min(5, touchStartRef.current.scale * factor));
+        
+        // 新しいスケールの計算 (1.0 〜 5.0)
+        const newScale = Math.max(1, Math.min(5, currentScale * factor));
+        
+        // ピボット（指の中間点）に基づいた移動量の計算
+        const pivotX = clientX - rect.left - rect.width / 2;
+        const pivotY = clientY - rect.top - rect.height / 2;
+        const scaleRatio = newScale / currentScale;
+        
+        // 前回の中間点からのドラッグ移動量（パン）
+        const dx = clientX - lastTouchRef.current.clientX;
+        const dy = clientY - lastTouchRef.current.clientY;
+
+        const newPosX = currentPos.x * scaleRatio + pivotX * (1 - scaleRatio) + dx;
+        const newPosY = currentPos.y * scaleRatio + pivotY * (1 - scaleRatio) + dy;
+
+        // 境界制限を適用
+        const bounded = getBoundedPosition(newPosX, newPosY, newScale);
+
         setScale(newScale);
-      } else if (e.touches.length === 1 && !touchStartRef.current.isPinching && currentScale > 1) {
+        setPosition(bounded);
+
+        // 次のmoveイベントの基準として状態を更新
+        lastTouchRef.current = {
+          clientX,
+          clientY,
+          distance: dist > 0 ? dist : 1,
+        };
+      } else if (e.touches.length === 1 && currentScale > 1) {
         // ドラッグ（パン）の計算 (画像がズームしている時のみパン移動を許可し、背後のスクロールを抑止)
         e.preventDefault();
-        const t = e.touches[0];
-        const dx = t.clientX - touchStartRef.current.x;
-        const dy = t.clientY - touchStartRef.current.y;
         
-        setPosition({
-          x: touchStartRef.current.posX + dx,
-          y: touchStartRef.current.posY + dy
-        });
+        const t = e.touches[0];
+        const dx = t.clientX - lastTouchRef.current.clientX;
+        const dy = t.clientY - lastTouchRef.current.clientY;
+
+        const newPosX = currentPos.x + dx;
+        const newPosY = currentPos.y + dy;
+
+        // 境界制限を適用
+        const bounded = getBoundedPosition(newPosX, newPosY, currentScale);
+        setPosition(bounded);
+
+        // 次のmoveイベントの基準として状態を更新
+        lastTouchRef.current = {
+          clientX: t.clientX,
+          clientY: t.clientY,
+          distance: 0,
+        };
       }
     };
 
     // タッチ終了時の処理
-    const handleTouchEndRaw = () => {
-      const currentScale = scaleRef.current;
-      // ズーム倍率が1以下になったら位置を中央リセットする
-      if (currentScale <= 1) {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
+    const handleTouchEndRaw = (e: TouchEvent) => {
+      // 指が離れた時点で基準位置を再取得（残っている指へのスムーズな遷移）
+      updateTouchPoints(e);
+
+      if (e.touches.length === 0) {
+        const currentScale = scaleRef.current;
+        if (currentScale <= 1) {
+          // ズーム倍率が1以下になったら位置を中央リセット
+          setScale(1);
+          setPosition({ x: 0, y: 0 });
+        } else {
+          // 指を離した際にも位置の境界を再補正する
+          const currentPos = positionRef.current;
+          const bounded = getBoundedPosition(currentPos.x, currentPos.y, currentScale);
+          setPosition(bounded);
+        }
       }
     };
 
@@ -171,6 +293,7 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt, onClose 
       >
         {/* CSSの影響を受けないよう、画像(imgタグ)自体に対して直接transform(ズーム)を適用する */}
         <img 
+          ref={imgRef}
           src={src} 
           alt={alt} 
           className="lightbox-image" 
