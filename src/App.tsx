@@ -39,7 +39,7 @@ export default function App() {
   // 編集完了（台形補正・フィルタ適用済み）
   const handleSavePage = (
     warpedImageSrc: string,
-    _filterMode: 'color' | 'mono' | 'document',
+    _filterMode: 'color' | 'document',
     enableOcr: boolean,
     rect?: DOMRect | null
   ) => {
@@ -90,6 +90,11 @@ export default function App() {
           onBackToScanner={() => {
             setCurrentRawImage(null); // 再撮影用に一時生画像キャッシュをクリア
             setStep('scan');
+          }}
+          onBackToEdit={() => {
+            // 直前に確定したページをやり直すため、配列の末尾から取り除く
+            setScannedPages(prev => prev.slice(0, -1));
+            setStep('edit');
           }}
         />
       )}

@@ -9,6 +9,7 @@ interface ExportPreviewProps {
   exportMode: 'pdf' | 'jpeg';
   onComplete: () => void;
   onBackToScanner: () => void;
+  onBackToEdit?: () => void;
 }
 
 // ピンチイン・アウト、ドラッグ(パン)、ダブルタップズームに対応した画像拡大プレビューコンポーネント (画像への直接transform適用 & リスナー範囲限定版)
@@ -198,7 +199,8 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   pages,
   exportMode,
   onComplete,
-  onBackToScanner
+  onBackToScanner,
+  onBackToEdit
 }) => {
   const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({});
   const [isProcessing, setIsProcessing] = useState(false); // 初期表示はOCRを実行しないため非ローディング
@@ -222,16 +224,131 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     return `${yyyy}${mm}${dd}_${hh}${min}${ss}`;
   };
 
-  // 全ページのJPEGの概算合計サイズ(MB)を計算する
-  const getJpegsTotalSizeMb = (): string => {
-    let totalBytes = 0;
-    for (const page of pages) {
-      const base64Data = page.split(',')[1] || page;
-      totalBytes += Math.round((base64Data.length * 3) / 4);
+
+
+  // 画像を256色（インデックスカラー相当）に減色したPNGのBlobに変換する
+  const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          
+          // 256色への均等量子化減色 (R:3bit, G:3bit, B:2bit)
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.round(data[i] / 36) * 36;
+            data[i+1] = Math.round(data[i+1] / 36) * 36;
+            data[i+2] = Math.round(data[i+2] / 85) * 85;
+          }
+          ctx.putImageData(imgData, 0, 0);
+          
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error("PNG blob generation failed"));
+            }
+          }, 'image/png');
+        } else {
+          reject(new Error("Canvas context failed"));
+        }
+      };
+      img.onerror = () => reject(new Error("Image load failed"));
+      img.src = imageSrc;
+    });
+  };
+
+
+
+
+
+  // PNGとして保存
+  const handleDownloadPng = async (imageSrc: string, index: number) => {
+    try {
+      setIsProcessing(true);
+      const blob = await convertToPngBlob(imageSrc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to convert and download as PNG:', err);
+    } finally {
+      setIsProcessing(false);
     }
-    // 品質95%での再圧縮により、元のDataURL（品質90%）に比べてわずかにファイルサイズが増加するため、
-    // 補正係数 0.95 を乗算
-    return ((totalBytes * 0.95) / 1024 / 1024).toFixed(2);
+  };
+
+  // 全ページをPNGとして順次ダウンロード保存
+  const handleDownloadAllPngs = async () => {
+    for (let i = 0; i < pages.length; i++) {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          handleDownloadPng(pages[i], i);
+          resolve();
+        }, i * 300); // ブラウザブロック防止のため300msの間隔をあける
+      });
+    }
+  };
+
+  // 個別PNGの共有
+  const handleShareSinglePng = async (imageSrc: string, index: number) => {
+    try {
+      setIsProcessing(true);
+      const blob = await convertToPngBlob(imageSrc);
+      const fileName = `SCAN_${getFormattedTimestamp()}_${String(index + 1).padStart(3, '0')}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+      
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+        });
+      } else {
+        handleDownloadPng(imageSrc, index);
+      }
+    } catch (err) {
+      console.error("Failed to share single PNG:", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 全ページの一括PNG共有
+  const handleSharePngs = async () => {
+    try {
+      setIsProcessing(true);
+      const filesList: File[] = [];
+      
+      for (let i = 0; i < pages.length; i++) {
+        const fileName = `SCAN_${getFormattedTimestamp()}_${String(i + 1).padStart(3, '0')}.png`;
+        const blob = await convertToPngBlob(pages[i]);
+        const file = new File([blob], fileName, { type: 'image/png' });
+        filesList.push(file);
+      }
+      
+      setIsProcessing(false);
+
+      if (navigator.canShare && navigator.canShare({ files: filesList })) {
+        await navigator.share({
+          files: filesList,
+        });
+      } else {
+        handleDownloadAllPngs();
+      }
+    } catch (err) {
+      console.error("Failed to share PNGs:", err);
+      setIsProcessing(false);
+      handleDownloadAllPngs();
+    }
   };
 
   // 必要に応じてOCRおよびPDFを遅延評価（生成）する関数
@@ -518,10 +635,10 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       {/* ヘッダーバー */}
       <div className="header-bar">
         <button
-          onClick={onBackToScanner}
+          onClick={onBackToEdit || onBackToScanner}
           className="btn-text-nav"
         >
-          再編集
+          戻る
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>エクスポート</h3>
         <button
@@ -556,23 +673,22 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         {activeTab === 'pdf' ? (
           /* PDF/画像プレビュー */
           <div style={{ width: '100%', maxWidth: '360px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div className="preview-pdf-info-card">
-              <div className="pdf-icon-wrapper" style={{ backgroundColor: exportMode === 'jpeg' ? '#e0e7ff' : undefined }}>
-                <FileText style={{ width: '24px', height: '24px', color: exportMode === 'jpeg' ? '#4f46e5' : undefined }} />
+            {exportMode === 'pdf' && (
+              <div className="preview-pdf-info-card">
+                <div className="pdf-icon-wrapper">
+                  <FileText style={{ width: '24px', height: '24px' }} />
+                </div>
+                <div className="pdf-info-text">
+                  <h4 className="pdf-info-filename">
+                    スキャンドキュメント.pdf
+                  </h4>
+                  <p className="pdf-info-meta">
+                    {pages.length} ページ • {pdfBlob ? `${(pdfBlob.size / 1024 / 1024).toFixed(2)} MB` : '未生成 (保存時に作成)'}
+                  </p>
+                </div>
+                <CheckCircle2 style={{ width: '20px', height: '20px', color: '#10b981' }} />
               </div>
-              <div className="pdf-info-text">
-                <h4 className="pdf-info-filename">
-                  {exportMode === 'jpeg' ? 'スキャン画像 (JPEG一括)' : 'スキャンドキュメント.pdf'}
-                </h4>
-                <p className="pdf-info-meta">
-                  {exportMode === 'jpeg' 
-                    ? `${pages.length} ページ • 約 ${getJpegsTotalSizeMb()} MB` 
-                    : `${pages.length} ページ • ${pdfBlob ? `${(pdfBlob.size / 1024 / 1024).toFixed(2)} MB` : '未生成 (保存時に作成)'}`
-                  }
-                </p>
-              </div>
-              <CheckCircle2 style={{ width: '20px', height: '20px', color: '#10b981' }} />
-            </div>
+            )}
 
             {/* 各ページのサムネイル */}
             <div className="thumbnail-grid">
@@ -590,23 +706,42 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
                   />
                   <div className="thumbnail-card-bar">
                     <span className="thumbnail-card-title">
-                      ページ {idx + 1}
+                      P {idx + 1}
                     </span>
-                    <div style={{ display: 'flex', gap: '4px' }}>
+                    <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                      {/* JPEG 共有/保存 */}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleShareSingleJpeg(page, idx); }}
                         className="thumbnail-card-download"
-                        style={{ backgroundColor: '#4f46e5' }}
+                        style={{ backgroundColor: '#4f46e5', width: '22px', height: '22px', padding: '0' }}
                         title="JPEGを共有"
                       >
-                        <Share2 style={{ width: '12px', height: '12px' }} />
+                        <Share2 style={{ width: '10px', height: '10px' }} />
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDownloadJpeg(page, idx); }}
                         className="thumbnail-card-download"
-                        title="JPEGとして保存"
+                        style={{ backgroundColor: '#334155', width: '22px', height: '22px', padding: '0' }}
+                        title="JPEG保存"
                       >
-                        <Download style={{ width: '12px', height: '12px' }} />
+                        <Download style={{ width: '10px', height: '10px' }} />
+                      </button>
+                      {/* PNG 共有/保存 */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleShareSinglePng(page, idx); }}
+                        className="thumbnail-card-download"
+                        style={{ backgroundColor: '#10b981', width: '22px', height: '22px', padding: '0' }}
+                        title="PNGを共有"
+                      >
+                        <Share2 style={{ width: '10px', height: '10px', color: '#fff' }} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDownloadPng(page, idx); }}
+                        className="thumbnail-card-download"
+                        style={{ backgroundColor: '#0f172a', width: '22px', height: '22px', padding: '0', border: '1px solid #334155' }}
+                        title="PNG保存"
+                      >
+                        <Download style={{ width: '10px', height: '10px', color: '#fff' }} />
                       </button>
                     </div>
                   </div>
@@ -649,26 +784,48 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       {/* 下部アクションバー */}
       <div className="export-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 20px' }}>
         {exportMode === 'jpeg' ? (
-          /* JPEG用アクション (OCRなし・高速画像出力) */
-          <>
-            <button
-              onClick={handleShareJpegs}
-              className="btn-primary-large"
-              style={{ width: '100%', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', backgroundColor: '#4f46e5' }}
-            >
-              <Share2 style={{ width: '20px', height: '20px' }} />
-              JPEG画像を共有・送信する
-            </button>
+          /* JPEG/PNG用アクション (OCRなし・高速画像出力) */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+            {/* 共有段 */}
+            <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+              <button
+                onClick={handleShareJpegs}
+                className="btn-primary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', backgroundColor: '#6366f1', padding: '16px', borderRadius: '16px', fontSize: '14px', fontWeight: '700' }}
+              >
+                <Share2 style={{ width: '18px', height: '18px' }} />
+                JPEG共有
+              </button>
+              <button
+                onClick={handleSharePngs}
+                className="btn-primary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', backgroundColor: '#4f46e5', padding: '16px', borderRadius: '16px', fontSize: '14px', fontWeight: '700' }}
+              >
+                <Share2 style={{ width: '18px', height: '18px' }} />
+                PNG共有
+              </button>
+            </div>
             
-            <button
-              onClick={handleDownloadAllJpegs}
-              className="btn-secondary-large"
-              style={{ width: '100%', margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px', borderRadius: '16px', fontWeight: '700', backgroundColor: '#334155', border: '1px solid #475569', color: '#fff' }}
-            >
-              <Download style={{ width: '18px', height: '18px' }} />
-              JPEG保存 ({pages.length}枚)
-            </button>
-          </>
+            {/* 保存段 */}
+            <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+              <button
+                onClick={handleDownloadAllJpegs}
+                className="btn-secondary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px', borderRadius: '16px', fontSize: '14px', fontWeight: '700', backgroundColor: '#334155', border: '1px solid #475569', color: '#fff' }}
+              >
+                <Download style={{ width: '16px', height: '16px' }} />
+                JPEG保存
+              </button>
+              <button
+                onClick={handleDownloadAllPngs}
+                className="btn-secondary-large"
+                style={{ flex: 1, margin: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px', borderRadius: '16px', fontSize: '14px', fontWeight: '700', backgroundColor: '#1e293b', border: '1px solid #334155', color: '#fff' }}
+              >
+                <Download style={{ width: '16px', height: '16px' }} />
+                PNG保存
+              </button>
+            </div>
+          </div>
         ) : (
           /* PDF用アクション (OCR付きサーチャブルPDF) */
           <>

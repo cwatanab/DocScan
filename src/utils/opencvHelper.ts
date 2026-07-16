@@ -457,7 +457,7 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
  * @param canvas 回転対象 of Canvas
  * @returns 回転後の新しいCanvas
  */
-export function rotateImage90(canvas: HTMLCanvasElement): HTMLCanvasElement {
+export function rotateImage90(canvas: HTMLCanvasElement, clockwise: boolean = true): HTMLCanvasElement {
   const cv = (window as any).cv;
   if (!cv) return canvas;
 
@@ -465,8 +465,8 @@ export function rotateImage90(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const dst = new cv.Mat();
   const resultCanvas = document.createElement('canvas');
 
-  // 90度反時計回りに回転
-  cv.rotate(src, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
+  // 時計回り(右) or 反時計回り(左) に回転
+  cv.rotate(src, dst, clockwise ? cv.ROTATE_90_CLOCKWISE : cv.ROTATE_90_COUNTERCLOCKWISE);
   
   // imshowするためにCanvasのサイズを入れ替える
   resultCanvas.width = canvas.height;
@@ -521,9 +521,9 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
 /**
  * 画像の色彩や特徴量を解析し、最適なフィルターモードを自動判定する
  * @param canvas 解析対象の補正後画像Canvas
- * @returns 'color' | 'mono' | 'document'
+ * @returns 'color' | 'document'
  */
-export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'mono' | 'document' {
+export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'document' {
   const cv = (window as any).cv;
   if (!cv || !cv.Mat) {
     return 'document'; // フォールバック
@@ -548,32 +548,8 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'mono'
     channels.delete();
 
     // 彩度の平均値が 15 以上なら「カラー画像」とみなす
-    // (紙面の白い部分のノイズ程度なら平均彩度は 3〜8 に収まります。文字や写真に色が入ると15を軽々と超えます)
     if (meanSat > 15) {
       return 'color';
-    }
-
-    // 2. モノクロの場合、ドキュメント(白黒はっきり)か、モノクロ写真/イラストかの判定
-    // 文字ドキュメントの特徴である「双峰性の輝度分布 (白と黒がはっきり分かれる)」を簡易的に判別するため、
-    // グレースケール画像の標準偏差（コントラストの強さ）をチェックする
-    let gray = new cv.Mat();
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    
-    let mean = new cv.Mat();
-    let stddev = new cv.Mat();
-    cv.meanStdDev(gray, mean, stddev);
-    
-    // stddev.doubleAt(0, 0) で標準偏差を取得
-    const stddevVal = stddev.doubleAt(0, 0);
-    
-    mean.delete();
-    stddev.delete();
-    gray.delete();
-
-    // 標準偏差が低い（コントラストが弱い、グレーの中間調が多いモノクロ写真など）場合は 'mono'
-    // 標準偏差が高い（白と黒のメリハリが強い書類）場合は 'document' を選択
-    if (stddevVal < 45) {
-      return 'mono';
     }
   } catch (e) {
     console.error("Error in detecting optimal filter: ", e);

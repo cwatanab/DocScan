@@ -6,7 +6,7 @@ import type { Point } from '../utils/opencvHelper';
 interface DocumentEditorProps {
   imageSrc: string;
   initialCorners: Point[];
-  onSave: (warpedImageSrc: string, filterMode: 'color' | 'mono' | 'document', enableOcr: boolean, rect?: DOMRect | null) => void;
+  onSave: (warpedImageSrc: string, filterMode: 'color' | 'document', enableOcr: boolean, rect?: DOMRect | null) => void;
   onCancel: () => void;
 }
 
@@ -23,7 +23,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   
   const [corners, setCorners] = useState<Point[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [filterMode, setFilterMode] = useState<'color' | 'mono' | 'document'>('document');
+  const [filterMode, setFilterMode] = useState<'color' | 'document'>('document');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
   const [isWarped, setIsWarped] = useState(false);
@@ -33,8 +33,8 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
   const [enableOcr, setEnableOcr] = useState(false); // OCR実行のトグルステート (デフォルトOFF)
 
-  // 90度時計回り回転処理 (補正後の画像を回転)
-  const handleRotate = () => {
+  // 90度回転処理 (補正後の画像を回転。左右指定可能)
+  const handleRotate = (clockwise: boolean = true) => {
     if (!warpedImage) return;
     const img = new Image();
     img.onload = () => {
@@ -44,7 +44,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       const ctx = tempCanvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0);
-        const rotatedCanvas = rotateImage90(tempCanvas);
+        const rotatedCanvas = rotateImage90(tempCanvas, clockwise);
         const url = rotatedCanvas.toDataURL('image/jpeg', 0.95);
         setWarpedImage(url);
       }
@@ -263,20 +263,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
   };
 
-  // リセット
-  const handleReset = () => {
-    if (imageSize.width > 0) {
-      const defaultCorners = [
-        { x: imageSize.width * 0.1, y: imageSize.height * 0.1 },
-        { x: imageSize.width * 0.9, y: imageSize.height * 0.1 },
-        { x: imageSize.width * 0.9, y: imageSize.height * 0.9 },
-        { x: imageSize.width * 0.1, y: imageSize.height * 0.9 }
-      ];
-      setCorners(defaultCorners);
-    }
-    setIsWarped(false);
-    setWarpedImage(null);
-  };
+
 
   return (
     <div className="editor-container"
@@ -291,7 +278,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           onClick={onCancel}
           className="btn-text-nav"
         >
-          キャンセル
+          戻る
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>
           {isWarped ? 'フィルタ適用' : 'トリミング調整'}
@@ -409,84 +396,87 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
         <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
 
-      {/* 下部コントロールエリア */}
-      <div className="editor-footer">
-        {isWarped ? (
-          /* フィルタ切り替えモード */
+      {/* 下部コントロールエリア (フィルタ適用モードの時のみフッターパネルを表示) */}
+      {isWarped && (
+        <div className="editor-footer" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* 行1: フィルター選択 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
-              フィルター選択
+              モード
             </span>
             <div className="filter-tabs">
               <button
+                type="button"
                 onClick={() => setFilterMode('document')}
                 className={`filter-tab-btn ${filterMode === 'document' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
               >
                 ドキュメント
               </button>
               <button
-                onClick={() => setFilterMode('mono')}
-                className={`filter-tab-btn ${filterMode === 'mono' ? 'filter-tab-btn-active' : ''}`}
-              >
-                白黒
-              </button>
-              <button
+                type="button"
                 onClick={() => setFilterMode('color')}
                 className={`filter-tab-btn ${filterMode === 'color' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
               >
                 カラー
               </button>
             </div>
-            
-            <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+          </div>
+          
+          {/* 行2: 画像の回転 */}
+          <div className="filter-tabs-container">
+            <span className="filter-tabs-label">
+              画像の回転
+            </span>
+            <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
               <button
-                onClick={handleRotate}
-                className="btn-secondary-full"
-                style={{ flex: 1, marginTop: 0 }}
-              >
-                <RotateCw style={{ width: '16px', height: '16px' }} />
-                右90°回転
-              </button>
-              <button
-                onClick={() => setIsWarped(false)}
+                type="button"
+                onClick={() => handleRotate(false)} // 左90° (CCW)
                 className="btn-secondary-full"
                 style={{ flex: 1, marginTop: 0 }}
               >
                 <RotateCcw style={{ width: '16px', height: '16px' }} />
-                範囲調整に戻る
+                左90°
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRotate(true)} // 右90° (CW)
+                className="btn-secondary-full"
+                style={{ flex: 1, marginTop: 0 }}
+              >
+                <RotateCw style={{ width: '16px', height: '16px' }} />
+                右90°
               </button>
             </div>
+          </div>
 
-            {/* OCRオンオフトグルスイッチ (インライン型: 左側にスイッチ、右側にラベル) */}
-            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: '10px', width: '100%', padding: '6px 4px', margin: '8px 0 4px 0' }}>
-              <label className="switch-toggle-mini">
-                <input 
-                  type="checkbox" 
-                  checked={enableOcr} 
-                  onChange={(e) => setEnableOcr(e.target.checked)} 
-                />
-                <span className="switch-slider-mini"></span>
-              </label>
-              <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>OCRを行う</span>
+          {/* 行3: 保存形式 */}
+          <div className="filter-tabs-container">
+            <span className="filter-tabs-label">
+              保存形式
+            </span>
+            <div className="filter-tabs">
+              <button
+                type="button"
+                onClick={() => setEnableOcr(true)}
+                className={`filter-tab-btn ${enableOcr ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                PDF(OCR)
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnableOcr(false)}
+                className={`filter-tab-btn ${!enableOcr ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                PNG/JPEG
+              </button>
             </div>
           </div>
-        ) : (
-          /* 範囲調整モード */
-          <div className="editor-footer-row">
-            <button
-              onClick={handleReset}
-              className="btn-secondary-text"
-            >
-              <RotateCcw style={{ width: '16px', height: '16px' }} />
-              リセット
-            </button>
-            
-            <span className="footer-text-hint">
-              4つの角をドラッグして書類に合わせてください
-            </span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
