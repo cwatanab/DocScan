@@ -28,7 +28,24 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
   const [isWarped, setIsWarped] = useState(initialIsWarped);
   const [warpedImage, setWarpedImage] = useState<string | null>(null);
-  const [enableOcr, setEnableOcr] = useState(false); // OCR実行のトグルステート (デフォルトOFF)
+  // 保存形式の記憶 (localStorage から復元)
+  const [enableOcr, setEnableOcr] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('docscan_enable_ocr');
+      return saved ? JSON.parse(saved) : false;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const handleToggleOcr = (val: boolean) => {
+    setEnableOcr(val);
+    try {
+      localStorage.setItem('docscan_enable_ocr', JSON.stringify(val));
+    } catch (e) {
+      console.warn("Failed to persist ocr state:", e);
+    }
+  };
 
   // カスタムフックを呼び出して、ピンのドラッグと拡大ルーペのロジックを一括委譲
   const {
@@ -349,7 +366,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             <div className="filter-tabs">
               <button
                 type="button"
-                onClick={() => setEnableOcr(true)}
+                onClick={() => handleToggleOcr(true)}
                 className={`filter-tab-btn ${enableOcr ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
@@ -357,7 +374,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setEnableOcr(false)}
+                onClick={() => handleToggleOcr(false)}
                 className={`filter-tab-btn ${!enableOcr ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >

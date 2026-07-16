@@ -328,6 +328,22 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
   resultCanvas.width = canvas.width;
   resultCanvas.height = canvas.height;
 
+  // --- 自動補正のための画像解析 (平均輝度の算出) ---
+  let meanVal = 128;
+  try {
+    const grayForStats = new cv.Mat();
+    cv.cvtColor(src, grayForStats, cv.COLOR_RGBA2GRAY);
+    const meanMat = new cv.Mat();
+    const stddevMat = new cv.Mat();
+    cv.meanStdDev(grayForStats, meanMat, stddevMat);
+    meanVal = meanMat.doubleAt(0, 0);
+    grayForStats.delete();
+    meanMat.delete();
+    stddevMat.delete();
+  } catch (e) {
+    console.warn("Failed to calculate image stats for auto filter:", e);
+  }
+
   if (mode === 'color') {
     // カラーモード: 紙の陰影ムラを除去（除算）しつつ、インクの鮮やかさを残してガンマ補正をかける
     const channels = new cv.MatVector();
@@ -337,9 +353,21 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    const gamma = 1.25; // カラーの階調を破綻させず背景を明るくする適正なガンマ値
-    const minVal = 20;  // カラーインクの色味を残すために黒引き締めは浅めにする
-    const maxVal = 235; // ハイライト（背景の紙）を白へ伸ばすしきい値
+    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する
+    let gamma = 1.25;
+    let minVal = 20;
+    let maxVal = 235;
+
+    if (meanVal < 130) {
+      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
+      gamma = Math.max(1.0, 1.25 - ((130 - meanVal) / 130) * 0.25);
+      minVal = Math.max(10, 20 - Math.round((130 - meanVal) / 10));
+      maxVal = Math.max(190, 235 - Math.round((130 - meanVal) / 3));
+    } else {
+      // 明るい画像 ➔ コントラストを高め、白飛びを防ぐ
+      gamma = Math.min(1.5, 1.25 + ((meanVal - 130) / 125) * 0.25);
+      minVal = Math.min(30, 20 + Math.round((meanVal - 130) / 12));
+    }
     
     for (let i = 0; i < 256; i++) {
       let val = i;
@@ -406,7 +434,6 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
     
     // 背景の推定 (膨張・平滑化)
-    // カーネルサイズを 19 から 33 に拡大し、細い罫線や文字が背景とみなされて消去されるのを防ぐ
     const dilated = new cv.Mat();
     const bg = new cv.Mat();
     const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
@@ -420,9 +447,22 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    const gamma = 1.5;  // ガンマ補正を適度に抑え、罫線などの中間トーンの細い線が消えるのを防ぐ
-    const minVal = 30;  // 黒の引き締め開始しきい値。少し下げることで、薄い文字もしっかり黒くする
-    const maxVal = 225; // 白飛びのしきい値。195から225に引き上げることで、薄いグレー（罫線など）を残す
+    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する
+    let gamma = 1.5;
+    let minVal = 30;
+    let maxVal = 225;
+
+    if (meanVal < 130) {
+      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るく補正し、文字の潰れを防ぐ
+      gamma = Math.max(1.15, 1.5 - ((130 - meanVal) / 130) * 0.35);
+      minVal = Math.max(15, 30 - Math.round((130 - meanVal) / 8));
+      maxVal = Math.max(180, 225 - Math.round((130 - meanVal) / 2.5));
+    } else {
+      // 明るい画像 ➔ コントラストを高めて文字をしっかり引き締める
+      gamma = Math.min(1.85, 1.5 + ((meanVal - 130) / 125) * 0.35);
+      minVal = Math.min(45, 30 + Math.round((meanVal - 130) / 8));
+      maxVal = Math.min(235, 225 + Math.round((meanVal - 130) / 12));
+    }
     
     for (let i = 0; i < 256; i++) {
       let val = i;

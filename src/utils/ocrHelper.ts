@@ -2,6 +2,7 @@
 import init, { WasmOcrEngineBuilder } from './pure_onnx_ocr';
 // @ts-ignore
 import wasmUrl from './pure_onnx_ocr_bg.wasm?url';
+import { resizeCanvas } from './imageExportHelper';
 
 export interface OcrWord {
   text: string;
@@ -49,26 +50,6 @@ async function canvasToArrayBuffer(canvas: HTMLCanvasElement): Promise<ArrayBuff
       reader.readAsArrayBuffer(blob);
     }, 'image/jpeg', 0.95);
   });
-}
-
-// Canvas を指定の最大長辺にリサイズするヘルパー
-function resizeCanvas(canvas: HTMLCanvasElement, maxSide: number): HTMLCanvasElement {
-  const width = canvas.width;
-  const height = canvas.height;
-  if (Math.max(width, height) <= maxSide) return canvas;
-
-  const ratio = maxSide / Math.max(width, height);
-  const newWidth = Math.round(width * ratio);
-  const newHeight = Math.round(height * ratio);
-
-  const resizedCanvas = document.createElement('canvas');
-  resizedCanvas.width = newWidth;
-  resizedCanvas.height = newHeight;
-  const ctx = resizedCanvas.getContext('2d');
-  if (ctx) {
-    ctx.drawImage(canvas, 0, 0, newWidth, newHeight);
-  }
-  return resizedCanvas;
 }
 
 // OCRエンジン専用の画像前処理（影の除去と輪郭シャープネス強調）
