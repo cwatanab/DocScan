@@ -183,13 +183,14 @@ export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLC
  */
 export function detectDocument(srcCanvas: HTMLCanvasElement): Point[] | null {
   const cv = (window as any).cv;
+  if (!cv) return null;
+
   const width = srcCanvas.width;
   const height = srcCanvas.height;
 
-  if (!cv) return null;
-
   // 1. 高速化とノイズ抑制のため、画像を縮小して処理する
-  const maxDim = 300; // 長辺 300px に超軽量リサイズ
+  // 300px から 500px に引き上げて解像度と検出精度を大幅に向上
+  const maxDim = 500;
   const scale = maxDim / Math.max(width, height);
   const scaledWidth = Math.round(width * scale);
   const scaledHeight = Math.round(height * scale);
@@ -199,101 +200,164 @@ export function detectDocument(srcCanvas: HTMLCanvasElement): Point[] | null {
   cv.resize(src, resized, new cv.Size(scaledWidth, scaledHeight), 0, 0, cv.INTER_AREA);
 
   const gray = new cv.Mat();
-  const blurred = new cv.Mat();
-  const edged = new cv.Mat();
-  const contours = new cv.MatVector();
-  const hierarchy = new cv.Mat();
+  cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY);
+
+  // 四角形（ドキュメント輪郭）を探すヘルパー関数
+  const findQuadrilateral = (binaryImg: any, minArea: number): Point[] | null => {
+    const contours = new cv.MatVector();
+    const hierarchy = new cv.Mat();
+    
+    try {
+      cv.findContours(binaryImg, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+      let maxArea = 0;
+      let bestPts: Point[] | null = null;
+
+      for (let i = 0; i < contours.size(); ++i) {
+        const contour = contours.get(i);
+        const area = cv.contourArea(contour);
+
+        if (area > minArea && area > maxArea) {
+          const peri = cv.arcLength(contour, true);
+          
+          // epsilon (近似の許容誤差) を動的に変化させて 4点近似 を探索する
+          // 0.015 から 0.035 まで細かく刻んで試すことで、用紙のたわみや歪みに強くする
+          for (let epsScale = 0.015; epsScale <= 0.035; epsScale += 0.005) {
+            const tempApprox = new cv.Mat();
+            cv.approxPolyDP(contour, tempApprox, epsScale * peri, true);
+
+            if (tempApprox.rows === 4 && cv.isContourConvex(tempApprox)) {
+              // 4つの頂点座標を抽出
+              const pts: Point[] = [];
+              for (let j = 0; j < 4; j++) {
+                pts.push({
+                  x: tempApprox.data32S[j * 2],
+                  y: tempApprox.data32S[j * 2 + 1]
+                });
+              }
+              
+              // 幾何学的な妥当性検証 (対角線の長さ比をチェックして極端に潰れた四角形を除外)
+              const d1 = Math.hypot(pts[0].x - pts[2].x, pts[0].y - pts[2].y);
+              const d2 = Math.hypot(pts[1].x - pts[3].x, pts[1].y - pts[3].y);
+              const diagRatio = Math.min(d1, d2) / Math.max(d1, d2);
+              
+              if (diagRatio > 0.25) { 
+                maxArea = area;
+                bestPts = pts;
+                tempApprox.delete();
+                break;
+              }
+            }
+            tempApprox.delete();
+          }
+        }
+      }
+      return bestPts;
+    } catch (e) {
+      console.error("Error in findQuadrilateral: ", e);
+      return null;
+    } finally {
+      contours.delete();
+      hierarchy.delete();
+    }
+  };
 
   try {
-    // グレースケール化 & ガウシアンブラーで平滑化
-    cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY);
+    // 検出する最小面積しきい値（画像全体の12%以上。15%から引き下げて少し引きの撮影にも追従させる）
+    const minAreaThreshold = (scaledWidth * scaledHeight) * 0.12;
+    
+    // --- パス1: Canny法エッジ抽出による標準検出 ---
+    const blurred = new cv.Mat();
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-
-    // Canny法でエッジ抽出
-    cv.Canny(blurred, edged, 75, 200);
-
-    // 輪郭同士の接続を強化するため、カーネルサイズ3x3で膨張（Dilate）処理を行う
+    
+    const edged = new cv.Mat();
+    // しきい値を少し下げて（75, 200 -> 50, 150）境界エッジをより確実に拾う
+    cv.Canny(blurred, edged, 50, 150);
+    
     const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
     cv.dilate(edged, edged, M);
     M.delete();
 
-    // 輪郭検出
-    cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    let resultPts = findQuadrilateral(edged, minAreaThreshold);
+    
+    edged.delete();
+    blurred.delete();
 
-    let maxArea = 0;
-    let maxContourIndex = -1;
-    let approx = new cv.Mat();
+    // --- パス2: Canny法で見つからなかった場合、適応的二値化（Adaptive Threshold）によるフォールバック検出 ---
+    // 白い机の上の白い紙や、全体的な照明ムラ（影）がある低コントラスト環境で無類の強さを発揮
+    if (!resultPts) {
+      const adaptive = new cv.Mat();
+      cv.adaptiveThreshold(
+        gray,
+        adaptive,
+        255,
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY,
+        21, // ローカル近傍領域のサイズ
+        5   // 平均から引く定数
+      );
+      
+      // 輪郭線を閉じるためのクローズ処理（ノイズ除去・輪郭の接続）
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+      cv.morphologyEx(adaptive, adaptive, cv.MORPH_CLOSE, kernel);
+      kernel.delete();
 
-    // 検出するドキュメントの最小面積しきい値（画像全体の15%以上）
-    const minAreaThreshold = (scaledWidth * scaledHeight) * 0.15;
+      resultPts = findQuadrilateral(adaptive, minAreaThreshold);
+      adaptive.delete();
+    }
 
-    // 面積が最大で、多角形近似した際に4頂点の凸四角形となるものを探す
-    for (let i = 0; i < contours.size(); ++i) {
-      const contour = contours.get(i);
-      const area = cv.contourArea(contour);
+    // --- パス3: それでも4角形が見つからなかった場合、最大面積輪郭の最小回転境界長方形（minAreaRect）から強引に4隅を算出 ---
+    if (!resultPts) {
+      const blurredForFallback = new cv.Mat();
+      cv.GaussianBlur(gray, blurredForFallback, new cv.Size(5, 5), 0);
+      const edgedForFallback = new cv.Mat();
+      cv.Canny(blurredForFallback, edgedForFallback, 50, 150);
+      
+      const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+      cv.dilate(edgedForFallback, edgedForFallback, M);
+      M.delete();
 
-      if (area > minAreaThreshold && area > maxArea) {
-        const peri = cv.arcLength(contour, true);
-        const tempApprox = new cv.Mat();
-        
-        // 輪郭の近似化 (アルゴリズムの許容誤差を設定)
-        cv.approxPolyDP(contour, tempApprox, 0.02 * peri, true);
+      const contours = new cv.MatVector();
+      const hierarchy = new cv.Mat();
+      cv.findContours(edgedForFallback, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-        // 4頂点かつ凸多角形であることを確認
-        if (tempApprox.rows === 4 && cv.isContourConvex(tempApprox)) {
+      let maxArea = 0;
+      let fallbackContourIndex = -1;
+      for (let i = 0; i < contours.size(); ++i) {
+        const contour = contours.get(i);
+        const area = cv.contourArea(contour);
+        if (area > minAreaThreshold && area > maxArea) {
           maxArea = area;
-          maxContourIndex = i;
-          approx.delete();
-          approx = tempApprox;
-        } else {
-          tempApprox.delete();
+          fallbackContourIndex = i;
         }
       }
+
+      if (fallbackContourIndex !== -1) {
+        const contour = contours.get(fallbackContourIndex);
+        const rotatedRect = cv.minAreaRect(contour);
+        const vertices = cv.RotatedRect.points(rotatedRect);
+        resultPts = [];
+        for (let i = 0; i < 4; i++) {
+          resultPts.push({
+            x: vertices[i].x,
+            y: vertices[i].y
+          });
+        }
+      }
+
+      contours.delete();
+      hierarchy.delete();
+      edgedForFallback.delete();
+      blurredForFallback.delete();
     }
 
-    // 4角形が正しく検出された場合
-    if (maxContourIndex !== -1 && approx.rows === 4) {
-      const pts: Point[] = [];
-      for (let i = 0; i < 4; i++) {
-        const x = approx.data32S[i * 2];
-        const y = approx.data32S[i * 2 + 1];
-        pts.push({
-          x: Math.max(0, Math.min(Math.round(x / scale), width)),
-          y: Math.max(0, Math.min(Math.round(y / scale), height))
-        });
-      }
-      approx.delete();
-      return sortPoints(pts);
-    }
-
-    approx.delete();
-
-    // -- フォールバック処理 --
-    // きれいな凸四角形が検出できなかった場合、面積が最大である輪郭の
-    // 最小境界回転四角形 (minAreaRect) を計算して 4隅を推定する
-    maxArea = 0;
-    let fallbackContourIndex = -1;
-    for (let i = 0; i < contours.size(); ++i) {
-      const contour = contours.get(i);
-      const area = cv.contourArea(contour);
-      if (area > minAreaThreshold && area > maxArea) {
-        maxArea = area;
-        fallbackContourIndex = i;
-      }
-    }
-
-    if (fallbackContourIndex !== -1) {
-      const contour = contours.get(fallbackContourIndex);
-      const rotatedRect = cv.minAreaRect(contour);
-      const vertices = cv.RotatedRect.points(rotatedRect);
-      const pts: Point[] = [];
-      for (let i = 0; i < 4; i++) {
-        pts.push({
-          x: Math.max(0, Math.min(Math.round(vertices[i].x / scale), width)),
-          y: Math.max(0, Math.min(Math.round(vertices[i].y / scale), height))
-        });
-      }
-      return sortPoints(pts);
+    // 検出できた場合は、座標を元の画像スケールに復元してソートして返す
+    if (resultPts) {
+      const finalPts = resultPts.map(pt => ({
+        x: Math.max(0, Math.min(Math.round(pt.x / scale), width)),
+        y: Math.max(0, Math.min(Math.round(pt.y / scale), height))
+      }));
+      return sortPoints(finalPts);
     }
 
   } catch (e) {
@@ -302,10 +366,6 @@ export function detectDocument(srcCanvas: HTMLCanvasElement): Point[] | null {
     src.delete();
     resized.delete();
     gray.delete();
-    blurred.delete();
-    edged.delete();
-    contours.delete();
-    hierarchy.delete();
   }
 
   return null;

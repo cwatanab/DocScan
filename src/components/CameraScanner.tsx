@@ -366,7 +366,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
               </div>
               <div className="scanner-header-content">
                 <h1 className="scanner-title">DocScan</h1>
-                <p className="scanner-guidance-text">書類を枠線に合わせてください</p>
+                <p className="scanner-guidance-text">書類全体が写るようにしてください</p>
               </div>
             </div>
           </>
