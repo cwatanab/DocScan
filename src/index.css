@@ -773,6 +773,10 @@ html, body {
   transition: all 0.2s;
   white-space: nowrap;
 }
+.filter-tab-btn:active {
+  background-color: var(--bg-surface-elevated);
+  transform: scale(0.97);
+}
 .filter-tab-btn-active {
   background-color: var(--primary);
   color: #fff;

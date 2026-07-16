@@ -429,23 +429,23 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             <span className="filter-tabs-label">
               画像の回転
             </span>
-            <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
+            <div className="filter-tabs" style={{ flex: 1, display: 'flex' }}>
               <button
                 type="button"
                 onClick={() => handleRotate(false)} // 左90° (CCW)
-                className="btn-secondary-full"
-                style={{ flex: 1, marginTop: 0 }}
+                className="filter-tab-btn"
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                <RotateCcw style={{ width: '16px', height: '16px' }} />
+                <RotateCcw style={{ width: '12px', height: '12px' }} />
                 左90°
               </button>
               <button
                 type="button"
                 onClick={() => handleRotate(true)} // 右90° (CW)
-                className="btn-secondary-full"
-                style={{ flex: 1, marginTop: 0 }}
+                className="filter-tab-btn"
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                <RotateCw style={{ width: '16px', height: '16px' }} />
+                <RotateCw style={{ width: '12px', height: '12px' }} />
                 右90°
               </button>
             </div>
