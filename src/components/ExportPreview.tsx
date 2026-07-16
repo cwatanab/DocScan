@@ -344,9 +344,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       } else {
         handleDownloadAllPngs();
       }
-    } catch (err) {
-      console.error("Failed to share PNGs:", err);
+    } catch (err: any) {
       setIsProcessing(false);
+      if (err.name === 'AbortError') {
+        console.log("PNG sharing was canceled by user.");
+        return;
+      }
+      console.error("Failed to share PNGs:", err);
       handleDownloadAllPngs();
     }
   };
@@ -491,7 +495,11 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       } else {
         handleDownloadJpeg(imageSrc, index);
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log("Single JPEG sharing was canceled by user.");
+        return;
+      }
       console.error("Failed to share single JPEG:", err);
       handleDownloadJpeg(imageSrc, index);
     }
@@ -518,9 +526,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       } else {
         handleDownloadAllJpegs();
       }
-    } catch (err) {
-      console.error("Failed to share JPEGs:", err);
+    } catch (err: any) {
       setIsProcessing(false);
+      if (err.name === 'AbortError') {
+        console.log("JPEG sharing was canceled by user.");
+        return;
+      }
+      console.error("Failed to share JPEGs:", err);
       handleDownloadAllJpegs();
     }
   };
