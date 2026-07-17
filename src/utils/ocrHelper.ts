@@ -23,7 +23,8 @@ let detSession: ort.InferenceSession | null = null;
 let recSession: ort.InferenceSession | null = null;
 let ocrDict: string[] = [];
 
-// OCRエンジン専用の画像前処理（影の除去と輪郭シャープネス強調）
+// OCRエンジン専用の画像前処理
+// (過剰な画像処理による文字のエッジ潰れや誤読を防ぐため、単純なグレースケール化のみを行います)
 function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const cv = (window as any).cv;
   if (!cv) return canvas;
@@ -34,45 +35,8 @@ function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const src = cv.imread(inputCanvas);
   const dst = new cv.Mat();
   
-  // 1. グレースケール化
+  // 1. グレースケール化のみを適用
   cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-  
-  // 2. 背景の推定 (膨張・平滑化) と除算 (Division) による影の除去
-  const dilated = new cv.Mat();
-  const bg = new cv.Mat();
-  const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(19, 19));
-  cv.dilate(dst, dilated, M);
-  cv.medianBlur(dilated, bg, 19);
-  cv.divide(dst, bg, dst, 255.0);
-  
-  // 3. OCR専用の超コントラスト調整 (文字は漆黒、背景は純白に極端化するLUT)
-  // ※二値化しすぎると細い文字が掠れて消滅するため、スキャンアプリ側では無効化して影消しとシャープネスのみを行います。
-  /*
-  const lut = new cv.Mat(1, 256, cv.CV_8UC1);
-  const data = new Uint8Array(256);
-  const gamma = 2.0;  // 中間色を強烈に引き締める
-  const minVal = 70;  // 70以下のグレーを完全な黒(0)にする
-  const maxVal = 180; // 180以上の明るい領域を完全な白(255)にする
-  for (let i = 0; i < 256; i++) {
-    let val = i;
-    if (val <= minVal) {
-      val = 0;
-    } else if (val >= maxVal) {
-      val = 255;
-    } else {
-      val = ((val - minVal) / (maxVal - minVal)) * 255;
-    }
-    const corrected = Math.pow(val / 255.0, gamma) * 255.0;
-    data[i] = Math.min(255, Math.max(0, corrected));
-  }
-  lut.data.set(data);
-  cv.LUT(dst, lut, dst);
-  */
-
-  // 4. アンシャープマスクによる輪郭のシャープネス強調
-  const blurred = new cv.Mat();
-  cv.GaussianBlur(dst, blurred, new cv.Size(3, 3), 1.0, 1.0);
-  cv.addWeighted(dst, 1.6, blurred, -0.6, 0, dst);
 
   // 結果の書き出し
   const resultCanvas = document.createElement('canvas');
@@ -83,11 +47,6 @@ function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   // リソースの削除
   src.delete();
   dst.delete();
-  dilated.delete();
-  bg.delete();
-  M.delete();
-  // lut.delete();
-  blurred.delete();
 
   return resultCanvas;
 }

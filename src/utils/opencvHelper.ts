@@ -421,18 +421,20 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    // カラーモード: 背景除算(Division)によってすでに紙の影は白く飛んでいるため、
-    // 中間色の崩壊(過剰なギラつき)を防ぐため、コントラスト補正は極めて穏やかに適用します。
-    let gamma = 1.0;
-    let minVal = 0;
-    let maxVal = 255;
+    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する (コントラストと文字を引き締める調整)
+    let gamma = 1.2;
+    let minVal = 15;
+    let maxVal = 240;
 
-    if (meanVal < 110) {
-      // 露出が極端に不足している暗い画像のみ、ガンマ補正で明るく調整
-      gamma = 0.85; 
-    } else if (meanVal > 200) {
-      // 非常に明るい画像は、わずかに引き締める
-      gamma = 1.05;
+    if (meanVal < 130) {
+      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
+      gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
+      minVal = Math.max(10, 15 - Math.round((130 - meanVal) / 10));
+      maxVal = Math.max(190, 240 - Math.round((130 - meanVal) / 3));
+    } else {
+      // 明るい画像 ➔ ガンマを上げてコントラストを引き締める
+      gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
+      minVal = Math.min(25, 15 + Math.round((meanVal - 130) / 12));
     }
     
     for (let i = 0; i < 256; i++) {
@@ -505,28 +507,26 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     cv.dilate(dst, dilated, M);
     cv.medianBlur(dilated, bg, 33);
     
-    // 元画像 / 背景推定画像 の除算 (Division) を行い、陰影ムラを完全に白(255)へ平滑化する
+    // 影消し (背景を確実に白く飛ばすため 100% 適用に戻す)
     cv.divide(dst, bg, dst, 255.0);
-
-    // ガンマ補正 & しきい値ストレッチで、背景を完全な白に、文字を完全な黒にする
+    
+    // ガンマ補正 & しきい値ストレッチ (紙の白さを保証しつつ、文字の極端なギラつき・掠れを防ぐマイルドな設定)
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する
-    let gamma = 1.5;
-    let minVal = 30;
-    let maxVal = 225;
+    // コントラストパラメータ (背景を白く、文字をくっきり引き締めるガンマ補正)
+    let gamma = 1.35;
+    let minVal = 20;
+    let maxVal = 230;
 
-    if (meanVal < 130) {
-      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るく補正し、文字の潰れを防ぐ
-      gamma = Math.max(1.15, 1.5 - ((130 - meanVal) / 130) * 0.35);
-      minVal = Math.max(15, 30 - Math.round((130 - meanVal) / 8));
-      maxVal = Math.max(180, 225 - Math.round((130 - meanVal) / 2.5));
-    } else {
-      // 明るい画像 ➔ コントラストを高めて文字をしっかり引き締める
-      gamma = Math.min(1.85, 1.5 + ((meanVal - 130) / 125) * 0.35);
-      minVal = Math.min(45, 30 + Math.round((meanVal - 130) / 8));
-      maxVal = Math.min(235, 225 + Math.round((meanVal - 130) / 12));
+    if (meanVal < 110) {
+      gamma = 1.1; // 暗い画像は少し明るく調整しつつコントラストも残す
+      minVal = 10;
+      maxVal = 220;
+    } else if (meanVal > 200) {
+      gamma = 1.5; // 明るい画像はさらに強めにコントラストを効かせる
+      minVal = 30;
+      maxVal = 240;
     }
     
     for (let i = 0; i < 256; i++) {
