@@ -126,10 +126,7 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const sigmoid = (x: number) => 1.0 / (1.0 + Math.exp(-x));
     const confidence = sigmoid(scoreLogit);
 
-    console.log(`[AI Seg] Inference Results - score_logit: ${scoreLogit.toFixed(4)}, confidence: ${confidence.toFixed(4)}, coords_len: ${coordsData.length}`);
-    if (coordsData.length >= 8) {
-      console.log(`[AI Seg] Raw coordinates:`, Array.from(coordsData).map(v => v.toFixed(3)));
-    }
+
 
     // ドキュメントが見つからない（写っていない）と判断された場合は null
     // 信頼度閾値を 0.45 に引き上げて曖昧な誤検出を防止
@@ -151,7 +148,6 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const isBlAtCorner = x3 < margin && y3 > (1 - margin);
 
     if (isTlAtCorner && isTrAtCorner && isBrAtCorner && isBlAtCorner) {
-      console.log("[AI Seg] Ignored screen-wide boundary detection (corner stickiness).");
       return null;
     }
 
@@ -164,7 +160,6 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     );
 
     if (area > 0.85) {
-      console.log(`[AI Seg] Ignored large boundary detection (area ratio: ${area.toFixed(3)}).`);
       return null;
     }
 
@@ -189,7 +184,7 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       }  // BL
     ];
 
-    console.log(`[AI Seg] Document detected! (confidence: ${confidence.toFixed(3)})`);
+
     
     // 頂点を整列(左上、右上、右下、左下)して返す
     return sortPoints(pts);

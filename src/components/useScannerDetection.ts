@@ -39,7 +39,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
         .then((session) => {
           if (session) {
             setAiModelLoaded(true);
-            console.log("[useScannerDetection] AI segmentation model preloaded.");
+
           } else {
             setAiModelLoaded(false);
             console.warn("[useScannerDetection] AI model load failed.");
