@@ -428,15 +428,12 @@ function preprocessRecImage(canvas: HTMLCanvasElement): ort.Tensor {
   const numPixels = targetWidth * targetHeight;
   const inputBuffer = new Float32Array(numPixels * 3);
 
-  // HWC to NCHW, mean=0.5, std=0.5
+  // HWC to NCHW, mean=0.5, std=0.5 (最適化: 除算を事前乗算スケールにまとめ演算負荷を低減)
+  const scale = 2.0 / 255.0;
   for (let i = 0; i < numPixels; i++) {
-    const r = data[i * 4] / 255.0;
-    const g = data[i * 4 + 1] / 255.0;
-    const b = data[i * 4 + 2] / 255.0;
-
-    inputBuffer[i] = (r - 0.5) / 0.5;
-    inputBuffer[numPixels + i] = (g - 0.5) / 0.5;
-    inputBuffer[numPixels * 2 + i] = (b - 0.5) / 0.5;
+    inputBuffer[i] = data[i * 4] * scale - 1.0;
+    inputBuffer[numPixels + i] = data[i * 4 + 1] * scale - 1.0;
+    inputBuffer[numPixels * 2 + i] = data[i * 4 + 2] * scale - 1.0;
   }
 
   return new ort.Tensor('float32', inputBuffer, [1, 3, targetHeight, targetWidth]);
@@ -559,18 +556,18 @@ export async function performOcr(
     const detNumPixels = detWidth * detHeight;
     const detInputBuffer = new Float32Array(detNumPixels * 3);
 
-    const mean = [0.485, 0.456, 0.406];
-    const std = [0.229, 0.224, 0.225];
+    // NCHW (RGB) (最適化: 除算を事前乗算スケールとオフセットにまとめ演算負荷を低減)
+    const rScale = 1.0 / (255.0 * 0.229);
+    const rOffset = 0.485 / 0.229;
+    const gScale = 1.0 / (255.0 * 0.224);
+    const gOffset = 0.456 / 0.224;
+    const bScale = 1.0 / (255.0 * 0.225);
+    const bOffset = 0.406 / 0.225;
 
-    // NCHW (RGB)
     for (let i = 0; i < detNumPixels; i++) {
-      const r = detData[i * 4] / 255.0;
-      const g = detData[i * 4 + 1] / 255.0;
-      const b = detData[i * 4 + 2] / 255.0;
-
-      detInputBuffer[i] = (r - mean[0]) / std[0];
-      detInputBuffer[detNumPixels + i] = (g - mean[1]) / std[1];
-      detInputBuffer[detNumPixels * 2 + i] = (b - mean[2]) / std[2];
+      detInputBuffer[i] = detData[i * 4] * rScale - rOffset;
+      detInputBuffer[detNumPixels + i] = detData[i * 4 + 1] * gScale - gOffset;
+      detInputBuffer[detNumPixels * 2 + i] = detData[i * 4 + 2] * bScale - bOffset;
     }
 
     const detTensor = new ort.Tensor('float32', detInputBuffer, [1, 3, detHeight, detWidth]);

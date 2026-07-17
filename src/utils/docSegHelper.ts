@@ -125,15 +125,18 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     // NHWC 形式: [1, 224, 224, 3] (ピクセル順にR, G, Bを詰める)
     const inputBuffer = new Float32Array(numPixels * 3);
 
-    // ImageNet 標準の正規化 (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    for (let i = 0; i < numPixels; i++) {
-      const r = data[i * 4] / 255.0;
-      const g = data[i * 4 + 1] / 255.0;
-      const b = data[i * 4 + 2] / 255.0;
+    // ImageNet 標準の正規化 (最適化: 除算を事前乗算スケールとオフセットにまとめ演算負荷を低減)
+    const rScale = 1.0 / (255.0 * 0.229);
+    const rOffset = 0.485 / 0.229;
+    const gScale = 1.0 / (255.0 * 0.224);
+    const gOffset = 0.456 / 0.224;
+    const bScale = 1.0 / (255.0 * 0.225);
+    const bOffset = 0.406 / 0.225;
 
-      inputBuffer[i * 3] = (r - 0.485) / 0.229;
-      inputBuffer[i * 3 + 1] = (g - 0.456) / 0.224;
-      inputBuffer[i * 3 + 2] = (b - 0.406) / 0.225;
+    for (let i = 0; i < numPixels; i++) {
+      inputBuffer[i * 3] = data[i * 4] * rScale - rOffset;
+      inputBuffer[i * 3 + 1] = data[i * 4 + 1] * gScale - gOffset;
+      inputBuffer[i * 3 + 2] = data[i * 4 + 2] * bScale - bOffset;
     }
 
     const inputTensor = new ort.Tensor('float32', inputBuffer, [1, inputSize, inputSize, 3]);

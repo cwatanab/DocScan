@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Point } from '../utils/opencvHelper';
 import { calculateFocusScore } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded, checkShapeValidity } from '../utils/docSegHelper';
-import { resizeCanvas, resizeCanvasTo } from '../utils/imageExportHelper';
+import { resizeCanvasTo } from '../utils/imageExportHelper';
 
 export interface FrameCache {
   canvas: HTMLCanvasElement;
@@ -40,6 +40,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
 
   // Canvas アロケーション削減のためのプール
   const canvasPoolRef = useRef<HTMLCanvasElement[]>([]);
+  const smallCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const clearPool = useCallback(() => {
     canvasPoolRef.current.forEach(c => {
@@ -86,6 +87,11 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       cachedCornersRef.current = null;
       lastValidCornersRef.current = null;
       clearPool();
+      if (smallCanvasRef.current) {
+        smallCanvasRef.current.width = 0;
+        smallCanvasRef.current.height = 0;
+        smallCanvasRef.current = null;
+      }
     }
   }, [cameraActive, clearPool]);
 
@@ -153,8 +159,11 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
     // 3. ピントの計測と高解像度フレームのキャッシュ蓄積
     if (smoothCornersRef.current && (now - lastFocusScoreTimeRef.current > FOCUS_BUFFER_INTERVAL)) {
       try {
-        const smallCanvas = resizeCanvas(canvas, 300);
-        const score = calculateFocusScore(smallCanvas);
+        if (!smallCanvasRef.current) {
+          smallCanvasRef.current = document.createElement('canvas');
+        }
+        resizeCanvasTo(canvas, smallCanvasRef.current, 300);
+        const score = calculateFocusScore(smallCanvasRef.current);
 
         // プールからキャンバスを取得、なければ新規作成
         let tempCanvas: HTMLCanvasElement;

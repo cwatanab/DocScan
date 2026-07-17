@@ -8,18 +8,26 @@ import { join } from 'path'
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 const ORT_VERSION = pkg.dependencies['onnxruntime-web'].replace(/[^0-9.]/g, '')
 
-// CDNで読み込むため、ビルド成果物から不要になったWASMファイルを削除するプラグイン
+// Cloudflare Pages の 25MB 制限回避および不要ファイル削減のため、
+// ビルド成果物から不要な WASM/MJS ファイルを削除するプラグイン
 const removeWasmPlugin = () => {
   return {
     name: 'remove-wasm',
     async closeBundle() {
-      const distDir = join(process.cwd(), 'dist', 'assets')
+      // publicからコピーされたファイルは dist 直下に配置されるため、dist ディレクトリを対象とする
+      const distDir = join(process.cwd(), 'dist')
       try {
         const files = await fs.readdir(distDir)
         for (const file of files) {
-          if (file.startsWith('ort-wasm-') && file.endsWith('.wasm')) {
+          // ort-wasm-simd-threaded.wasm (13.4MB) のみローカル配信を残し、
+          // 25MB制限を超える jsep.wasm や不要な asyncify/jspi/mjs ファイルは削除する
+          if (
+            file.startsWith('ort-wasm-') &&
+            (file.endsWith('.wasm') || file.endsWith('.mjs')) &&
+            file !== 'ort-wasm-simd-threaded.wasm'
+          ) {
             await fs.unlink(join(distDir, file))
-            console.log(`[RemoveWasm] Removed CDN-delegated WASM asset: ${file}`)
+            console.log(`[RemoveWasm] Removed redundant WASM/MJS asset: ${file}`)
           }
         }
       } catch (err) {

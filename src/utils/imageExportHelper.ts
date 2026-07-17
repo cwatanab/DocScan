@@ -117,14 +117,37 @@ export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
         // 激しい等高線状 of ブロックノイズ（バンディング）を抑制するため、確率的ディザリングを適用
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const rNoise = (Math.random() - 0.5) * 36;
-          const gNoise = (Math.random() - 0.5) * 36;
-          const bNoise = (Math.random() - 0.5) * 85;
+        const len = data.length;
 
-          data[i] = Math.max(0, Math.min(255, Math.round((data[i] + rNoise) / 36) * 36));
-          data[i+1] = Math.max(0, Math.min(255, Math.round((data[i+1] + gNoise) / 36) * 36));
-          data[i+2] = Math.max(0, Math.min(255, Math.round((data[i+2] + bNoise) / 85) * 85));
+        // 【最適化】確率的ディザリングの高速化
+        // ループ内の Math.random() 呼び出しを削減するため、1024要素のノイズテーブルを事前生成
+        const noiseSize = 1024;
+        const rNoiseTab = new Float32Array(noiseSize);
+        const gNoiseTab = new Float32Array(noiseSize);
+        const bNoiseTab = new Float32Array(noiseSize);
+        for (let j = 0; j < noiseSize; j++) {
+          rNoiseTab[j] = (Math.random() - 0.5) * 36;
+          gNoiseTab[j] = (Math.random() - 0.5) * 36;
+          bNoiseTab[j] = (Math.random() - 0.5) * 85;
+        }
+
+        let noiseIdx = 0;
+        for (let i = 0; i < len; i += 4) {
+          const idx = noiseIdx & 1023;
+          noiseIdx++;
+
+          const r = data[i] + rNoiseTab[idx];
+          const g = data[i+1] + gNoiseTab[idx];
+          const b = data[i+2] + bNoiseTab[idx];
+
+          // 均等量子化 & クランプの高速化 (Math.round, Math.min, Math.maxの関数コールをインライン展開・ビット演算化)
+          const nr = (((r * 0.027777777777777776) + 0.5) | 0) * 36;
+          const ng = (((g * 0.027777777777777776) + 0.5) | 0) * 36;
+          const nb = (((b * 0.011764705882352941) + 0.5) | 0) * 85;
+
+          data[i] = nr < 0 ? 0 : nr > 255 ? 255 : nr;
+          data[i+1] = ng < 0 ? 0 : ng > 255 ? 255 : ng;
+          data[i+2] = nb < 0 ? 0 : nb > 255 ? 255 : nb;
         }
         ctx.putImageData(imgData, 0, 0);
         
