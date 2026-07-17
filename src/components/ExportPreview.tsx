@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Download, Share2, Loader2 } from 'lucide-react';
+import { Download, Share2 } from 'lucide-react';
 import type { OcrResult } from '../utils/ocrHelper';
 import { createSearchablePdf } from '../utils/pdfHelper';
 import { ZoomableImage } from './ZoomableImage';
@@ -212,7 +212,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
           />
         )}
         <div className="loading-content-wrapper">
-          <Loader2 className="spinner spinner-large" style={{ color: '#6366f1' }} />
+          <div className="spinner spinner-large" />
           <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{title}</h3>
           <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '90%', lineHeight: '1.5', textAlign: 'center' }}>
             {desc}

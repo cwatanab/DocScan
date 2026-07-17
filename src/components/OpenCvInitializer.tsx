@@ -1,5 +1,4 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import { clearAppCacheAndReload, isLocalExecution } from '../utils/imageExportHelper';
 
 interface OpenCvInitializerProps {
@@ -69,7 +68,7 @@ export const OpenCvInitializer: React.FC<OpenCvInitializerProps> = ({ cvError })
         </>
       ) : (
         <>
-          <Loader2 className="spinner spinner-large" style={{ color: '#6366f1', marginBottom: '16px' }} />
+          <div className="spinner spinner-large" />
           <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>初期化中</h3>
           <p>
             画像処理エンジンを初期化しています。これには数秒かかる場合があります。

@@ -2,8 +2,6 @@ import { CameraScanner } from './components/CameraScanner';
 import { DocumentEditor } from './components/DocumentEditor';
 import { ExportPreview } from './components/ExportPreview';
 import { useScanSession } from './utils/useScanSession';
-import { Loader2 } from 'lucide-react';
-
 export default function App() {
   const {
     step,
@@ -28,7 +26,7 @@ export default function App() {
     <div className="app-layout">
       {isOcrLoading && (
         <div className="loading-screen">
-          <Loader2 className="spinner spinner-large" color="var(--primary)" />
+          <div className="spinner spinner-large" />
           <h3>OCR テキスト解析中</h3>
           <p>
             文字情報を解析しています。これには数秒かかる場合があります。

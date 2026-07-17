@@ -38,7 +38,7 @@ export const ThumbnailGrid: React.FC<ThumbnailGridProps> = ({
             <span className="thumbnail-card-title">
               P {idx + 1}
             </span>
-            <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
               {/* JPEG 共有/保存 */}
               <button
                 onClick={(e) => { e.stopPropagation(); onShareSingleJpeg(page, idx); }}
