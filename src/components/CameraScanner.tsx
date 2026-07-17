@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon, Sparkles } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, RefreshCw } from 'lucide-react';
 import { detectDocument, calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
@@ -374,6 +374,29 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     reader.readAsDataURL(file);
   };
 
+  // キャッシュクリア＆ハードリロード
+  const handleClearCacheAndReload = async () => {
+    if (window.confirm("キャッシュをクリアしてアプリを再起動しますか？\n(モデルの読み込みエラーなどが解消されます)")) {
+      try {
+        // Cache Storage の全削除
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(key => caches.delete(key)));
+        }
+        // Service Worker の登録解除
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(reg => reg.unregister()));
+        }
+        console.log("[CameraScanner] Cache cleared, reloading...");
+        window.location.reload();
+      } catch (err) {
+        console.error("Failed to clear cache:", err);
+        window.location.reload();
+      }
+    }
+  };
+
   if (!cvReady) {
     return <OpenCvInitializer cvError={cvError} />;
   }
@@ -431,6 +454,37 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 <p className="scanner-guidance-text">書類全体が写るようにしてください</p>
               </div>
             </div>
+
+            {/* キャッシュクリア＆再起動ボタン (左下フローティング) */}
+            {!errorMsg && (
+              <button
+                onClick={handleClearCacheAndReload}
+                style={{
+                  position: 'absolute',
+                  left: '16px',
+                  bottom: '16px',
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(30, 41, 59, 0.75)',
+                  backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#e2e8f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  zIndex: 30,
+                  boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                }}
+                title="キャッシュをクリアして再起動"
+                type="button"
+              >
+                <RefreshCw style={{ width: '18px', height: '18px' }} />
+              </button>
+            )}
           </>
         )}
       </div>
