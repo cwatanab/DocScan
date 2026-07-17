@@ -73,11 +73,11 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     await yieldToUi();
 
     // WASM のパスとオプションを設定 (CORS・COEPエラー回避のためローカルからロード)
-    ort.env.wasm.wasmPaths = import.meta.env.BASE_URL;
+    const base = import.meta.env.BASE_URL;
+    ort.env.wasm.wasmPaths = base;
     ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 4);
 
     // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
-    const base = import.meta.env.BASE_URL;
     const [detRes, recRes, dictRes] = await Promise.all([
       fetch(`${base}models/PP-OCRv6_small_det_onnx/inference.onnx`),
       fetch(`${base}models/PP-OCRv6_small_rec_onnx/inference.onnx`),

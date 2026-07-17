@@ -29,6 +29,29 @@ const removeWasmPlugin = () => {
   }
 }
 
+// 開発サーバーで ort-wasm-simd-threaded.mjs の ?import クエリ付きアクセスに対して500エラーを回避するミドルウェア
+const wasmGlueMiddleware = () => {
+  return {
+    name: 'wasm-glue-middleware',
+    configureServer(server: any) {
+      server.middlewares.use((req: any, res: any, next: any) => {
+        if (req.url && req.url.includes('ort-wasm-simd-threaded.mjs')) {
+          try {
+            const filePath = join(process.cwd(), 'node_modules', 'onnxruntime-web', 'dist', 'ort-wasm-simd-threaded.mjs')
+            const content = readFileSync(filePath, 'utf-8')
+            res.setHeader('Content-Type', 'application/javascript')
+            res.end(content)
+            return
+          } catch (err) {
+            console.error('[wasm-glue-middleware] Error serving WASM glue script:', err)
+          }
+        }
+        next()
+      })
+    }
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   resolve: {
@@ -66,6 +89,7 @@ export default defineConfig({
     react(),
     basicSsl(),
     removeWasmPlugin(),
+    wasmGlueMiddleware(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
