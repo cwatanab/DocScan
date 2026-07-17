@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Image as ImageIcon, Sparkles, RefreshCw, X } from 'lucide-react';
-import { calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
+import { loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
-import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
+import { detectDocumentAI } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
 import { resizeCanvas } from '../utils/imageExportHelper';
 import { OpenCvInitializer } from './OpenCvInitializer';
+import { useScannerDetection } from './useScannerDetection';
 
 interface CameraScannerProps {
   onCapture: (imageSrc: string, initialCorners: Point[]) => void;
@@ -48,49 +49,14 @@ const getDefaultCorners = (w: number, h: number): Point[] => {
   ];
 };
 
-interface FrameCache {
-  canvas: HTMLCanvasElement;
-  corners: Point[];
-  score: number;
-}
-
 export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const recentFramesRef = useRef<FrameCache[]>([]);
   
   const [cvReady, setCvReady] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
-
-  // AI 検出用 state
-  const aiEnabled = true;
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiModelLoaded, setAiModelLoaded] = useState(isAISegEngineLoaded());
-
-  // AIモデルのプリロード
-  useEffect(() => {
-    if (aiEnabled && !aiModelLoaded && !aiLoading) {
-      setAiLoading(true);
-      initDocSegEngine()
-        .then((session) => {
-          if (session) {
-            setAiModelLoaded(true);
-            console.log("[CameraScanner] AI segmentation model preloaded.");
-          } else {
-            setAiModelLoaded(false);
-            console.warn("[CameraScanner] AI model load failed. Fallback to OpenCV enabled.");
-          }
-        })
-        .catch(err => {
-          console.error("[CameraScanner] Failed to preload AI model:", err);
-        })
-        .finally(() => {
-          setAiLoading(false);
-        });
-    }
-  }, [aiEnabled, aiModelLoaded, aiLoading]);
 
   // OpenCVのロード状態をチェック＆動的ロード
   useEffect(() => {
@@ -122,10 +88,18 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     animationFrameRef
   } = useCameraStream({ videoRef, cvReady });
 
+  // AI 境界検出とキャッシュバッファのカスタムフック呼び出し
+  const {
+    aiModelLoaded,
+    processDetectionFrame,
+    getBestCachedFrame,
+    resetDetection
+  } = useScannerDetection({ cameraActive });
+
   // カメラ停止とキャッシュバッファのクリア
   const stopCamera = () => {
     stopCameraStream();
-    recentFramesRef.current = []; // キャッシュクリア
+    resetDetection();
   };
 
   // リアルタイム輪郭検出ループ
@@ -138,19 +112,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     const overlayCanvas = overlayCanvasRef.current;
     const oCtx = overlayCanvas?.getContext('2d');
 
-    let lastDetectionTime = 0;
-    let lastFocusScoreTime = 0;
-    let cachedCorners: Point[] | null = null;
-    let lastValidCorners: Point[] | null = null;
     let smoothCorners: Point[] | null = null;
-    let lastSeenDetectionTime = 0;
 
-    const DETECTION_INTERVAL = 150; // 150ms ごとに輪郭検出を行う
-    const FOCUS_BUFFER_INTERVAL = 50; // 50ms ごとにピントスコアを計測する
-    const CORNER_KEEP_DURATION = 350; // 検出が途切れても 350ms は枠線を維持する
-    const SMOOTHING_FACTOR = 0.22; // 指数移動平均の平滑化係数
-
-    const processFrame = () => {
+    const processFrame = async () => {
       if (video.paused || video.ended) return;
 
       if (video.videoWidth > 0 && video.videoHeight > 0) {
@@ -167,102 +131,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         if (ctx) {
           // 生のカメラ映像を描画する
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-          const now = performance.now();
-          
-          // 1. ドキュメントの輪郭検出 (計算負荷を考慮し間引き。AIの場合は 300ms 間隔)
-          const currentInterval = (aiEnabled && aiModelLoaded) ? 300 : DETECTION_INTERVAL;
-          
-          if (now - lastDetectionTime > currentInterval) {
-            if (aiEnabled && aiModelLoaded) {
-              // プレビュー表示の更新をブロックしないよう非同期（Promise）でAI推論を走らせる
-              detectDocumentAI(canvas).then(detected => {
-                if (detected) {
-                  cachedCorners = detected;
-                  lastValidCorners = detected;
-                  lastSeenDetectionTime = performance.now();
-                } else {
-                  cachedCorners = null;
-                }
-              }).catch(err => {
-                console.error("AI detection error during preview: ", err);
-              });
-            } else {
-              cachedCorners = null;
-            }
-            lastDetectionTime = now;
-          }
-
-          // 2. 枠線の状態維持とジッター平滑化の計算
-          let targetCorners: Point[] | null = null;
-          if (cachedCorners) {
-            targetCorners = cachedCorners;
-          } else if (lastValidCorners && (now - lastSeenDetectionTime < CORNER_KEEP_DURATION)) {
-            // 検出が一時的に途切れた場合は前回の検出枠線を使用する
-            targetCorners = lastValidCorners;
-          } else {
-            smoothCorners = null;
-          }
-
-          if (targetCorners) {
-            if (!smoothCorners) {
-              smoothCorners = targetCorners;
-            } else {
-              // 座標の急激な変化（カメラ移動など）を検知する
-              let totalDist = 0;
-              for (let i = 0; i < 4; i++) {
-                totalDist += Math.hypot(targetCorners[i].x - smoothCorners[i].x, targetCorners[i].y - smoothCorners[i].y);
-              }
-              const avgDist = totalDist / 4;
-              
-              // 平均移動距離が画像の長辺の12%を超えていたら即時追従させる
-              const resetThreshold = Math.max(canvas.width, canvas.height) * 0.12;
-              if (avgDist > resetThreshold) {
-                smoothCorners = targetCorners;
-              } else {
-                // 指数移動平均による平滑化を適用する
-                smoothCorners = smoothCorners.map((pt, idx) => ({
-                  x: pt.x + (targetCorners![idx].x - pt.x) * SMOOTHING_FACTOR,
-                  y: pt.y + (targetCorners![idx].y - pt.y) * SMOOTHING_FACTOR
-                }));
-              }
-            }
-          }
-
-          // 3. ピントの計測と高解像度フレームのキャッシュ蓄積
-          if (smoothCorners && (now - lastFocusScoreTime > FOCUS_BUFFER_INTERVAL)) {
-            try {
-              // ピント計測用には 300px の超軽量キャンバスを使用する
-              const smallCanvas = resizeCanvas(canvas, 300);
-              const score = calculateFocusScore(smallCanvas);
-              
-              // 保存・OCR用には 1920px の最高解像度でキャンバスを生成する
-              const tempCanvas = resizeCanvas(canvas, 1920);
-              
-              // 縮小サイズに合わせて頂点座標もスケールする
-              const scaleX = tempCanvas.width / canvas.width;
-              const scaleY = tempCanvas.height / canvas.height;
-              const scaledCorners = smoothCorners.map(pt => ({
-                x: pt.x * scaleX,
-                y: pt.y * scaleY
-              }));
-
-              recentFramesRef.current.push({
-                canvas: tempCanvas,
-                corners: scaledCorners,
-                score
-              });
-
-              // 直近 8フレーム (約0.4秒分) にキャッシュを制限する
-              if (recentFramesRef.current.length > 8) {
-                recentFramesRef.current.shift();
-              }
-              
-              lastFocusScoreTime = now;
-            } catch (e) {
-              console.error("Error buffering frame: ", e);
-            }
-          }
+          // カスタムフックを呼び出して AI検出とフレーム蓄積を行う
+          smoothCorners = await processDetectionFrame(canvas);
         }
 
         // 緑の枠線は透過オーバーレイCanvasにのみ描画する
@@ -296,7 +166,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         }
       }
 
-      animationFrameRef.current = requestAnimationFrame(processFrame);
+      if (cameraActive) {
+        animationFrameRef.current = requestAnimationFrame(processFrame);
+      }
     };
 
     animationFrameRef.current = requestAnimationFrame(processFrame);
@@ -306,23 +178,15 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [cameraActive]);
+  }, [cameraActive, aiModelLoaded]);
 
   // シャッターを切る (キャッシュバッファから最もピントが合った＝エッジの立った写真を自動選択)
   const handleShutter = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     
     try {
-      const cachedFrames = recentFramesRef.current;
-      if (cachedFrames.length > 0) {
-        // ラプラシアン分散スコアが最も高いベストフレームを選択
-        let bestFrame = cachedFrames[0];
-        for (let i = 1; i < cachedFrames.length; i++) {
-          if (cachedFrames[i].score > bestFrame.score) {
-            bestFrame = cachedFrames[i];
-          }
-        }
-        
+      const bestFrame = getBestCachedFrame();
+      if (bestFrame) {
         // 1回だけ toDataURL を実行
         const dataUrl = bestFrame.canvas.toDataURL('image/jpeg', 0.95);
         
@@ -344,7 +208,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           const dataUrl = resized.toDataURL('image/jpeg', 0.92);
           
           let rawCorners: Point[] | null = null;
-          if (aiEnabled && aiModelLoaded) {
+          if (aiModelLoaded) {
             rawCorners = await detectDocumentAI(resized);
           }
           if (!rawCorners) {
@@ -380,7 +244,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           ctx.drawImage(img, 0, 0);
           
           let corners: Point[] | null = null;
-          if (aiEnabled && aiModelLoaded) {
+          if (aiModelLoaded) {
             corners = await detectDocumentAI(tempCanvas);
           }
           if (!corners) {

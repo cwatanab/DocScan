@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import { setupOrtEnvironment } from './ortConfig';
 import { resizeCanvas } from './imageExportHelper';
 
 export interface OcrWord {
@@ -73,9 +74,8 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     await yieldToUi();
 
     // WASM のパスとオプションを設定 (CORS・COEPエラー回避のためローカルからロード)
+    setupOrtEnvironment();
     const base = import.meta.env.BASE_URL;
-    ort.env.wasm.wasmPaths = base;
-    ort.env.wasm.numThreads = 1;
 
     // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
     const [detRes, recRes, dictRes] = await Promise.all([
