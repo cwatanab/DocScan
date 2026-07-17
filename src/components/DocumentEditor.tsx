@@ -81,16 +81,9 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     if (!warpedImage) return;
     const img = new Image();
     img.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const rotatedCanvas = rotateImage90(tempCanvas, clockwise);
-        const url = rotatedCanvas.toDataURL('image/jpeg', 0.95);
-        setWarpedImage(url);
-      }
+      const rotatedCanvas = rotateImage90(img, clockwise);
+      const url = rotatedCanvas.toDataURL('image/jpeg', 0.95);
+      setWarpedImage(url);
     };
     img.src = warpedImage;
   }, [warpedImage]);

@@ -145,7 +145,7 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /\/models\/.*\.(onnx|txt)$/,
+            urlPattern: /\/models\/.*\.(onnx|ort|txt)$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'models-cache',

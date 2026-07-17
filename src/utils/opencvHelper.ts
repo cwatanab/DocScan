@@ -13,7 +13,7 @@ let opencvLoadPromise: Promise<void> | null = null;
  * OpenCV.js のロードを監視する (シングルトン Promise)
  * @param timeoutMs タイムアウト時間 (ミリ秒)
  */
-export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
+export function loadOpenCV(timeoutMs: number = 90000): Promise<void> {
   if (opencvLoadPromise) {
     return opencvLoadPromise;
   }
@@ -56,7 +56,8 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
     // タイムアウト監視
     const timer = setTimeout(() => {
       window.removeEventListener('opencv-ready', handleReady);
-      reject(new Error("OpenCV.js 初期化がタイムアウトしました。ネットワーク接続を確認し、再読み込みしてください。"));
+      opencvLoadPromise = null; // エラー時はリセットして再試行可能にする
+      reject(new Error("初期化がタイムアウトしました。ネットワーク接続を確認し、再読み込みしてください。"));
     }, timeoutMs);
 
     // HTMLに存在するスクリプトタグのエラーイベントをフック
@@ -69,7 +70,8 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
         }
         clearTimeout(timer);
         window.removeEventListener('opencv-ready', handleReady);
-        reject(new Error("OpenCV.js スクリプトのダウンロードに失敗しました。"));
+        opencvLoadPromise = null; // エラー時はリセットして再試行可能にする
+        reject(new Error("初期化スクリプトのダウンロードに失敗しました。"));
       };
     } else {
       console.warn("[OpenCV] Static script tag '#opencv-script' not found in HTML.");
@@ -110,11 +112,17 @@ function distance(p1: Point, p2: Point): number {
  * @param corners 補正する4頂点 (左上, 右上, 右下, 左下)
  * @returns 補正後のCanvas
  */
-export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLCanvasElement {
+export function warpImage(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, corners: Point[]): HTMLCanvasElement {
   const cv = window.cv;
   if (!cv) {
     console.error("OpenCV.js is not loaded.");
-    return srcCanvas;
+    if (srcImgOrCanvas instanceof HTMLCanvasElement) {
+      return srcImgOrCanvas;
+    }
+    const c = document.createElement('canvas');
+    c.width = srcImgOrCanvas.width;
+    c.height = srcImgOrCanvas.height;
+    return c;
   }
 
   // 頂点のソート
@@ -142,7 +150,7 @@ export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLC
   let M: any = null;
 
   try {
-    src = cv.imread(srcCanvas);
+    src = cv.imread(srcImgOrCanvas);
     dst = new cv.Mat();
 
     // 変換元の4頂点
@@ -383,21 +391,31 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     cv.imshow(resultCanvas, dst);
   } finally {
     // メモリ解放 (例外時にも確実に実行して Wasm ヒープリークを防ぐ)
-    if (src) src.delete();
-    if (dst) dst.delete();
-    if (grayForStats) grayForStats.delete();
-    if (meanMat) meanMat.delete();
-    if (stddevMat) stddevMat.delete();
-    if (ycrcb) ycrcb.delete();
-    if (channels) channels.delete();
-    if (yChan) yChan.delete();
-    if (crChan) crChan.delete();
-    if (cbChan) cbChan.delete();
-    if (lut) lut.delete();
-    if (M) M.delete();
-    if (dilated) dilated.delete();
-    if (bg) bg.delete();
-    if (rgb) rgb.delete();
+    if (src) { try { src.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
+    if (grayForStats) { try { grayForStats.delete(); } catch(e){} }
+    if (meanMat) { try { meanMat.delete(); } catch(e){} }
+    if (stddevMat) { try { stddevMat.delete(); } catch(e){} }
+    if (ycrcb) { try { ycrcb.delete(); } catch(e){} }
+    if (yChan) { try { yChan.delete(); } catch(e){} }
+    if (crChan) { try { crChan.delete(); } catch(e){} }
+    if (cbChan) { try { cbChan.delete(); } catch(e){} }
+    if (channels) {
+      try {
+        for (let i = 0; i < channels.size(); i++) {
+          try {
+            const m = channels.get(i);
+            if (m) m.delete();
+          } catch(e){}
+        }
+        channels.delete();
+      } catch(e){}
+    }
+    if (lut) { try { lut.delete(); } catch(e){} }
+    if (M) { try { M.delete(); } catch(e){} }
+    if (dilated) { try { dilated.delete(); } catch(e){} }
+    if (bg) { try { bg.delete(); } catch(e){} }
+    if (rgb) { try { rgb.delete(); } catch(e){} }
   }
 
   return resultCanvas;
@@ -408,24 +426,35 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
  * @param canvas 回転対象 of Canvas
  * @returns 回転後の新しいCanvas
  */
-export function rotateImage90(canvas: HTMLCanvasElement, clockwise: boolean = true): HTMLCanvasElement {
+export function rotateImage90(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, clockwise: boolean = true): HTMLCanvasElement {
   const cv = window.cv;
-  if (!cv) return canvas;
+  if (!cv) {
+    if (srcImgOrCanvas instanceof HTMLCanvasElement) {
+      return srcImgOrCanvas;
+    }
+    const c = document.createElement('canvas');
+    c.width = srcImgOrCanvas.width;
+    c.height = srcImgOrCanvas.height;
+    return c;
+  }
 
   let src: any = null;
   let dst: any = null;
   const resultCanvas = document.createElement('canvas');
 
   try {
-    src = cv.imread(canvas);
+    src = cv.imread(srcImgOrCanvas);
     dst = new cv.Mat();
 
     // 時計回り(右) or 反時計回り(左) に回転
     cv.rotate(src, dst, clockwise ? cv.ROTATE_90_CLOCKWISE : cv.ROTATE_90_COUNTERCLOCKWISE);
     
-    // imshowするためにCanvas의 sizeを入れ替える
-    resultCanvas.width = canvas.height;
-    resultCanvas.height = canvas.width;
+    // imshowするためにCanvasのsizeを入れ替える
+    const w = srcImgOrCanvas instanceof HTMLImageElement ? (srcImgOrCanvas.naturalWidth || srcImgOrCanvas.width) : srcImgOrCanvas.width;
+    const h = srcImgOrCanvas instanceof HTMLImageElement ? (srcImgOrCanvas.naturalHeight || srcImgOrCanvas.height) : srcImgOrCanvas.height;
+
+    resultCanvas.width = h;
+    resultCanvas.height = w;
 
     cv.imshow(resultCanvas, dst);
   } finally {
@@ -439,7 +468,7 @@ export function rotateImage90(canvas: HTMLCanvasElement, clockwise: boolean = tr
 
 /**
  * 画像のフォーカススコア（ラプラシアン分散）を計算する。高いほどピントが合っておりエッジが立っている。
- * @param canvas 対象のCanvas
+ * @param canvas 対象 of Canvas
  * @returns フォーカススコア
  */
 export function calculateFocusScore(canvas: HTMLCanvasElement): number {
@@ -488,6 +517,7 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
 
   let src = cv.imread(canvas);
   let hsv = new cv.Mat();
+  let channels: any = null;
   
   try {
     // 1. カラーかどうかの判定 (HSVに変換し、Sチャンネルの平均値を見る)
@@ -495,15 +525,12 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
     cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
     
     // HSVの各チャンネルを分離
-    let channels = new cv.MatVector();
+    channels = new cv.MatVector();
     cv.split(hsv, channels);
     
     let sChan = channels.get(1); // S（彩度）チャンネルを取得
     let meanSat = cv.mean(sChan)[0]; // 彩度の平均値 (0-255)
     
-    sChan.delete();
-    channels.delete();
-
     // 彩度の平均値が 15 以上なら「カラー画像」とみなす
     if (meanSat > 15) {
       return 'color';
@@ -511,6 +538,14 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
   } catch (e) {
     console.error("Error in detecting optimal filter: ", e);
   } finally {
+    if (channels) {
+      try {
+        for (let i = 0; i < channels.size(); i++) {
+          try { channels.get(i).delete(); } catch(err){}
+        }
+        channels.delete();
+      } catch(err){}
+    }
     hsv.delete();
     src.delete();
   }
@@ -526,17 +561,8 @@ export function processWarpAndFilter(
   corners: Point[],
   filterMode: 'color' | 'document'
 ): string | null {
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = imageEl.naturalWidth || imageEl.width;
-  tempCanvas.height = imageEl.naturalHeight || imageEl.height;
-  const ctx = tempCanvas.getContext('2d');
-  
-  if (ctx) {
-    ctx.drawImage(imageEl, 0, 0);
-    const warpedCanvas = warpImage(tempCanvas, corners);
-    const filteredCanvas = applyFilter(warpedCanvas, filterMode);
-    return filteredCanvas.toDataURL('image/jpeg', 0.95);
-  }
-  return null;
+  const warpedCanvas = warpImage(imageEl, corners);
+  const filteredCanvas = applyFilter(warpedCanvas, filterMode);
+  return filteredCanvas.toDataURL('image/jpeg', 0.95);
 }
 

@@ -4,39 +4,33 @@ import type { Point } from './opencvHelper';
 import { sortPoints } from './opencvHelper';
 
 let docSegSession: ort.InferenceSession | null = null;
-let isInitializing = false;
+let initPromise: Promise<ort.InferenceSession | null> | null = null;
 
 /**
  * AIドキュメント境界検出エンジンの初期化
  */
-export async function initDocSegEngine(): Promise<ort.InferenceSession | null> {
-  if (docSegSession) return docSegSession;
-  if (isInitializing) {
-    // 初期化中の場合は完了するまで待つ
-    while (isInitializing) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    return docSegSession;
-  }
+export function initDocSegEngine(): Promise<ort.InferenceSession | null> {
+  if (docSegSession) return Promise.resolve(docSegSession);
+  if (initPromise) return initPromise;
 
-  isInitializing = true;
   setupOrtEnvironment();
 
-  try {
+  initPromise = (async () => {
+    try {
+      const modelPath = `${import.meta.env.BASE_URL}models/doc_seg.ort`;
+      docSegSession = await ort.InferenceSession.create(modelPath, {
+        executionProviders: ['wasm'],
+      });
+      return docSegSession;
+    } catch (err: any) {
+      console.warn('[AI Seg] Document corner detection model not found or failed to load. Falling back to OpenCV. Error detail:', err?.message || err, err?.stack || '');
+      docSegSession = null;
+      initPromise = null; // 再試行可能にする
+      return null;
+    }
+  })();
 
-    const modelPath = `${import.meta.env.BASE_URL}models/doc_seg.ort`;
-    docSegSession = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ['wasm'],
-    });
-
-    return docSegSession;
-  } catch (err) {
-    console.warn('[AI Seg] Document corner detection model not found or failed to load. Falling back to OpenCV.');
-    docSegSession = null;
-    return null;
-  } finally {
-    isInitializing = false;
-  }
+  return initPromise;
 }
 
 /**
@@ -44,6 +38,57 @@ export async function initDocSegEngine(): Promise<ort.InferenceSession | null> {
  */
 export function isAISegEngineLoaded(): boolean {
   return docSegSession !== null;
+}
+
+/**
+ * 4隅が凸四角形を構成し、かつ内角が極端な角度になっていないかを判定する
+ * @param pts 4つの点 (TL, TR, BR, BL)
+ * @param maxCos 許容する最大 cosθ値 (絶対値)
+ */
+export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
+  if (pts.length !== 4) return false;
+
+  // 1. 各頂点での外積のz成分を計算し、すべての符号が一致（凸四角形）しているか確認
+  const crossProducts: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    const pPrev = pts[(i + 3) % 4];
+    const pCurr = pts[i];
+    const pNext = pts[(i + 1) % 4];
+
+    const v1 = { x: pCurr.x - pPrev.x, y: pCurr.y - pPrev.y };
+    const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
+    crossProducts.push(v1.x * v2.y - v1.y * v2.x);
+  }
+
+  const allPositive = crossProducts.every(cp => cp > 0.0001);
+  const allNegative = crossProducts.every(cp => cp < -0.0001);
+  if (!allPositive && !allNegative) {
+    return false; // 凹型、自己交差、または一直線（三角形）
+  }
+
+  // 2. 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
+  for (let i = 0; i < 4; i++) {
+    const pPrev = pts[(i + 3) % 4];
+    const pCurr = pts[i];
+    const pNext = pts[(i + 1) % 4];
+
+    const v1 = { x: pPrev.x - pCurr.x, y: pPrev.y - pCurr.y };
+    const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
+
+    const len1 = Math.hypot(v1.x, v1.y);
+    const len2 = Math.hypot(v2.x, v2.y);
+
+    if (len1 < 0.001 || len2 < 0.001) {
+      return false; // 辺の長さが極端に短い（つぶれている）
+    }
+
+    const cosTheta = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2);
+    if (Math.abs(cosTheta) > maxCos) {
+      return false; // 鋭角・鈍角制限
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -64,6 +109,7 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const inputSize = 224; // DocCornerNet の入力解像度
 
     // 1. 画像のプリプロセス: 224x224にリサイズ
+    // (iOS Safariのバグ回避のため、シングルトンではなく毎回新規アロケート。300ms間隔のため負荷は軽微)
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = inputSize;
     tempCanvas.height = inputSize;
@@ -129,8 +175,8 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
 
 
     // ドキュメントが見つからない（写っていない）と判断された場合は null
-    // 信頼度閾値を 0.45 に引き上げて曖昧な誤検出を防止
-    if (confidence < 0.45) {
+    // 信頼度閾値を 0.5 に設定して曖昧な誤検出を防止
+    if (confidence < 0.5) {
       return null;
     }
 
@@ -151,15 +197,15 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       return null;
     }
 
-    // (B) 検出面積チェック: 四角形の面積が画面全体の 85% 以上を占めているか (Shoelace formula)
-    const area = 0.5 * Math.abs(
-      (x0 * y1 - y0 * x1) +
-      (x1 * y2 - y1 * x2) +
-      (x2 * y3 - y2 * x3) +
-      (x3 * y0 - y3 * x0)
-    );
-
-    if (area > 0.85) {
+    // (B) 形状の歪みフィルター (三角形化・自己交差の排除)
+    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.960 (約16度) と緩めにチェック
+    const rawPts = [
+      { x: x0, y: y0 }, // TL
+      { x: x1, y: y1 }, // TR
+      { x: x2, y: y2 }, // BR
+      { x: x3, y: y3 }  // BL
+    ];
+    if (!checkShapeValidity(rawPts, 0.960)) {
       return null;
     }
 

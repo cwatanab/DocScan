@@ -12,7 +12,7 @@ export default function App() {
   const [cvError, setCvError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadOpenCV(30000)
+    loadOpenCV(90000)
       .then(() => setCvReady(true))
       .catch((err) => {
         console.error("[App] OpenCV load failed:", err);

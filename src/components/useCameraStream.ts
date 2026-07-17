@@ -43,7 +43,14 @@ export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
           videoRef.current.srcObject = stream;
           videoRef.current.setAttribute('playsinline', 'true');
           videoRef.current.setAttribute('muted', 'true');
-          videoRef.current.play();
+          
+          // play() は非同期処理のため、割り込み（アンマウントや再ロード）による AbortError を安全にキャッチして無視します
+          videoRef.current.play().catch((err: any) => {
+            if (err.name !== 'AbortError') {
+              console.error('[CameraStream] video.play() failed:', err);
+            }
+          });
+          
           setCameraActive(true);
         }
       } catch (err: any) {

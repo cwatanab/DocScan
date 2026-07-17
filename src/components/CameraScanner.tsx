@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { Image as ImageIcon, Sparkles } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, RefreshCw } from 'lucide-react';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentWithFallback, getDefaultCorners } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
-import { resizeCanvas } from '../utils/imageExportHelper';
+import { resizeCanvas, clearAppCacheAndReload, isLocalExecution } from '../utils/imageExportHelper';
 import { useScannerDetection } from './useScannerDetection';
 
 interface CameraScannerProps {
@@ -239,25 +239,38 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 <p className="scanner-guidance-text">書類全体が写るようにしてください</p>
               </div>
             </div>
-
-            {/* 閉じるボタンはコントロールバーに戻したためフローティングは削除 */}
           </>
         )}
       </div>
 
       {/* コントロールバー */}
       <div className="scanner-controls">
-        {onCancel ? (
-          <button
-            onClick={onCancel}
-            className="scanner-close-btn"
-          >
-            閉じる
-          </button>
-        ) : (
-          /* レイアウトの対称性を維持し、シャッターを完全に中央に固定するためのダミースペース */
-          <div style={{ width: '60px', visibility: 'hidden' }} />
-        )}
+        {/* 左側エリア (閉じるボタン + キャッシュクリアボタン) - 幅固定で対称性を維持 */}
+        <div style={{ width: '120px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-start' }}>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="scanner-close-btn"
+              style={{ padding: '8px 0', minWidth: '48px', margin: 0 }}
+            >
+              閉じる
+            </button>
+          )}
+          {isLocalExecution() && (
+            <button
+              onClick={() => {
+                if (window.confirm("アプリのキャッシュをクリアして再起動しますか？")) {
+                  clearAppCacheAndReload();
+                }
+              }}
+              className="scanner-btn-secondary"
+              style={{ width: '44px', height: '44px', padding: 0 }}
+              title="キャッシュをクリアして再起動"
+            >
+              <RefreshCw style={{ width: '18px', height: '18px' }} />
+            </button>
+          )}
+        </div>
 
         <button
           onClick={handleShutter}
@@ -267,7 +280,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           <div className="scanner-shutter-inner" />
         </button>
 
-        <div>
+        {/* 右側エリア (ローカルファイル選択ボタン) - 幅固定で対称性を維持 */}
+        <div style={{ width: '120px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
           <input
             type="file"
             accept="image/*"
@@ -278,8 +292,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           <label
             htmlFor="file-input"
             className="scanner-btn-secondary"
+            style={{ width: '44px', height: '44px', margin: 0 }}
           >
-            <ImageIcon style={{ width: '20px', height: '20px' }} />
+            <ImageIcon style={{ width: '18px', height: '18px' }} />
           </label>
         </div>
       </div>

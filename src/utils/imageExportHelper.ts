@@ -58,26 +58,61 @@ export const resizeCanvas = (srcCanvas: HTMLCanvasElement, maxDim: number): HTML
 };
 
 /**
+ * 既存の Canvas にリサイズ描画するヘルパー。新規Canvasの作成を抑え、GC負荷を軽減します。
+ */
+export const resizeCanvasTo = (
+  srcCanvas: HTMLCanvasElement,
+  dstCanvas: HTMLCanvasElement,
+  maxDim: number
+): void => {
+  let w = srcCanvas.width;
+  let h = srcCanvas.height;
+  if (w > maxDim || h > maxDim) {
+    if (w > h) {
+      h = Math.round((h * maxDim) / w);
+      w = maxDim;
+    } else {
+      w = Math.round((w * maxDim) / h);
+      h = maxDim;
+    }
+  }
+  // iOS Safari 対策: 同じサイズの場合は width/height の再設定をスキップして、描画バッファのリセットや真っ黒化を防ぐ
+  if (dstCanvas.width !== w || dstCanvas.height !== h) {
+    dstCanvas.width = w;
+    dstCanvas.height = h;
+  }
+  const ctx = dstCanvas.getContext('2d');
+  if (ctx) {
+    ctx.drawImage(srcCanvas, 0, 0, w, h);
+  }
+};
+
+/**
  * DataURL画像を256色（インデックスカラー相当）に量子化減色した PNG Blobに変換する
  */
 export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) {
-        reject(new Error("Canvas context failed"));
-        return;
+      let w = img.width;
+      let h = img.height;
+      const maxDim = 1920;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
       }
-      tempCtx.drawImage(img, 0, 0);
       
-      // メモリー削減とフリーズ防止、共有準備遅延の解消のため1920pxにリサイズ
-      const canvas = resizeCanvas(tempCanvas, 1920);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.drawImage(img, 0, 0, w, h);
         // 【必須仕様】8bit/256色への均等量子化減色 (R:3bit, G:3bit, B:2bit)
         // 激しい等高線状 of ブロックノイズ（バンディング）を抑制するため、確率的ディザリングを適用
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -116,20 +151,25 @@ export const convertToJpegBlob = async (imageSrc: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) {
-        reject(new Error("Canvas context failed"));
-        return;
+      let w = img.width;
+      let h = img.height;
+      const maxDim = 1920;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
       }
-      tempCtx.drawImage(img, 0, 0);
-
-      // メモリー削減とフリーズ防止、共有準備遅延の解消のため1920pxにリサイズ
-      const canvas = resizeCanvas(tempCanvas, 1920);
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.drawImage(img, 0, 0, w, h);
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(blob);
@@ -269,4 +309,46 @@ export const shareAllPages = async (
     console.error("Failed to share pages:", err);
     await downloadAllPages(pages, format);
   }
+};
+
+/**
+ * PWA キャッシュと登録済み Service Worker を完全に削除し、アプリを強制再読み込みする
+ */
+export const clearAppCacheAndReload = async (): Promise<void> => {
+  try {
+    // 1. キャッシュストレージの全消去
+    if (window.caches) {
+      const keys = await caches.keys();
+      for (const key of keys) {
+        await caches.delete(key);
+      }
+    }
+    // 2. Service Worker の全解除
+    if (navigator.serviceWorker) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        await registration.unregister();
+      }
+    }
+  } catch (e) {
+    console.error("Error clearing app cache:", e);
+  } finally {
+    // 強制的にサーバーから最新ソースを取得してリロード
+    window.location.reload();
+  }
+};
+
+/**
+ * 現在のホスト名がローカル実行（localhost, 127.0.0.1, またはプライベートIPアドレス等）であるかを判定する
+ */
+export const isLocalExecution = (): boolean => {
+  const hn = window.location.hostname;
+  return (
+    hn === 'localhost' ||
+    hn === '127.0.0.1' ||
+    hn.startsWith('192.168.') ||
+    hn.startsWith('172.') ||
+    hn.startsWith('10.') ||
+    hn.endsWith('.local')
+  );
 };

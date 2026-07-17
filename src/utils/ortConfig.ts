@@ -15,5 +15,4 @@ export function setupOrtEnvironment(): void {
   ort.env.wasm.numThreads = 1;
 
   ortInitialized = true;
-
 }

@@ -63,8 +63,10 @@ export const useCropHandles = ({
 
     // Retina/高解像度対応のため、実ピクセルサイズは300px（CSSで150pxに縮小）
     const size = 300;
-    loupeCanvas.width = size;
-    loupeCanvas.height = size;
+    if (loupeCanvas.width !== size || loupeCanvas.height !== size) {
+      loupeCanvas.width = size;
+      loupeCanvas.height = size;
+    }
 
     ctx.clearRect(0, 0, size, size);
 

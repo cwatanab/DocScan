@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Point } from '../utils/opencvHelper';
 import { calculateFocusScore } from '../utils/opencvHelper';
-import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
-import { resizeCanvas } from '../utils/imageExportHelper';
+import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded, checkShapeValidity } from '../utils/docSegHelper';
+import { resizeCanvas, resizeCanvasTo } from '../utils/imageExportHelper';
 
 export interface FrameCache {
   canvas: HTMLCanvasElement;
@@ -38,6 +38,17 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
   const lastFocusScoreTimeRef = useRef<number>(0);
   const recentFramesRef = useRef<FrameCache[]>([]);
 
+  // Canvas アロケーション削減のためのプール
+  const canvasPoolRef = useRef<HTMLCanvasElement[]>([]);
+
+  const clearPool = useCallback(() => {
+    canvasPoolRef.current.forEach(c => {
+      c.width = 0;
+      c.height = 0;
+    });
+    canvasPoolRef.current = [];
+  }, []);
+
   const DETECTION_INTERVAL = 300; // AI推論の間隔 (300ms)
   const FOCUS_BUFFER_INTERVAL = 50; // キャッシュ蓄積の間隔 (50ms)
   const CORNER_KEEP_DURATION = 800; // 検出枠線を維持する時間 (800ms)
@@ -69,12 +80,14 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
   // カメラがオフになったらキャッシュをクリアする
   useEffect(() => {
     if (!cameraActive) {
+      recentFramesRef.current.forEach(discardFrame);
       recentFramesRef.current = [];
       smoothCornersRef.current = null;
       cachedCornersRef.current = null;
       lastValidCornersRef.current = null;
+      clearPool();
     }
-  }, [cameraActive]);
+  }, [cameraActive, clearPool]);
 
   /**
    * 毎フレームの検出とキャッシュ蓄積を処理する
@@ -142,7 +155,16 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       try {
         const smallCanvas = resizeCanvas(canvas, 300);
         const score = calculateFocusScore(smallCanvas);
-        const tempCanvas = resizeCanvas(canvas, 1920);
+
+        // プールからキャンバスを取得、なければ新規作成
+        let tempCanvas: HTMLCanvasElement;
+        if (canvasPoolRef.current.length > 0) {
+          tempCanvas = canvasPoolRef.current.pop()!;
+        } else {
+          tempCanvas = document.createElement('canvas');
+        }
+
+        resizeCanvasTo(canvas, tempCanvas, 1920);
 
         const scaleX = tempCanvas.width / canvas.width;
         const scaleY = tempCanvas.height / canvas.height;
@@ -160,7 +182,8 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
         if (recentFramesRef.current.length > 8) {
           const removed = recentFramesRef.current.shift();
           if (removed) {
-            discardFrame(removed);
+            // 解放する代わりにプールに戻す
+            canvasPoolRef.current.push(removed.canvas);
           }
         }
 
@@ -170,7 +193,13 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
     }
 
-    return smoothCornersRef.current;
+    // 最終的にプレビュー描画用として返す平滑化後の座標に対して、厳しめの歪みチェック (0.900 ≒ 25度) を実施
+    // 内部的な smoothCornersRef の追従（移動）は動かしつつ、画面に歪な形のまま描画されるのだけを防ぎます
+    const resultCorners = smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.900)
+      ? smoothCornersRef.current
+      : null;
+
+    return resultCorners;
   }, [aiModelLoaded]);
 
   /**
@@ -198,7 +227,8 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
     smoothCornersRef.current = null;
     cachedCornersRef.current = null;
     lastValidCornersRef.current = null;
-  }, []);
+    clearPool();
+  }, [clearPool]);
 
   return {
     aiLoading,

@@ -538,7 +538,8 @@ html, body {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 24px 32px calc(24px + env(safe-area-inset-bottom, 0px));
+  /* メディアクエリを使わず、ベースパディングを12pxに抑えたシンプルな1行で Safe Area に対応 */
+  padding: 16px 32px calc(12px + env(safe-area-inset-bottom, 0px));
   background: linear-gradient(to top, rgba(9, 13, 22, 0.95) 0%, rgba(9, 13, 22, 0.7) 70%, transparent 100%);
   display: flex;
   align-items: center;
