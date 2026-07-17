@@ -50,7 +50,10 @@ export default defineConfig({
         '**/*.jpg',
         '**/*.onnx',
         '**/*.ort',
-        '**/public/models/**'
+        '**/*.wasm',
+        '**/*.mjs',
+        '**/public/models/**',
+        '**/public/ort-wasm-simd-threaded.*'
       ]
     }
   },
@@ -98,7 +101,7 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /^(https:\/\/cdn\.jsdelivr\.net\/npm\/onnxruntime-web@|.*\/)ort-wasm-.*\.(wasm|mjs)(\?.*)?$/,
+            urlPattern: /ort-wasm-.*\.(wasm|mjs)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'ort-wasm-cache',
