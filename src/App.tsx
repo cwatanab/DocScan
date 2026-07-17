@@ -3,8 +3,23 @@ import { DocumentEditor } from './components/DocumentEditor';
 import { ExportPreview } from './components/ExportPreview';
 import { useScanSession } from './utils/useScanSession';
 import { Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { loadOpenCV } from './utils/opencvHelper';
+import { OpenCvInitializer } from './components/OpenCvInitializer';
 
 export default function App() {
+  const [cvReady, setCvReady] = useState(false);
+  const [cvError, setCvError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadOpenCV(30000)
+      .then(() => setCvReady(true))
+      .catch((err) => {
+        console.error("[App] OpenCV load failed:", err);
+        setCvError(err.message || 'OpenCV.js の読み込みに失敗しました。');
+      });
+  }, []);
+
   const {
     step,
     currentRawImage,
@@ -24,13 +39,17 @@ export default function App() {
     backToEdit
   } = useScanSession();
 
+  if (!cvReady) {
+    return <OpenCvInitializer cvError={cvError} />;
+  }
+
   return (
     <div className="app-layout">
       {isOcrLoading && (
-        <div className="loading-screen" style={{ zIndex: 10000, position: 'fixed', inset: 0 }}>
-          <Loader2 className="spinner spinner-large" style={{ color: '#6366f1', marginBottom: '16px' }} />
-          <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>OCR テキスト解析中</h3>
-          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '90%', lineHeight: '1.5', textAlign: 'center' }}>
+        <div className="loading-screen">
+          <Loader2 className="spinner spinner-large" color="var(--primary)" />
+          <h3>OCR テキスト解析中</h3>
+          <p>
             文字情報を解析しています。これには数秒かかる場合があります。
           </p>
         </div>
@@ -66,7 +85,7 @@ export default function App() {
 
       {/* 確定時の画像飛行（フワッと吸い込まれる）オーバーレイ */}
       {flyingImage && (
-        <div className="flying-image-overlay" style={{ pointerEvents: 'none' }}>
+        <div className="flying-image-overlay">
           <img
             src={flyingImage.src}
             alt="Flying page"

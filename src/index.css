@@ -143,7 +143,19 @@ html, body {
   padding: 24px;
   text-align: center;
   background-color: var(--bg-app);
-  z-index: 100;
+  z-index: 10000;
+}
+.loading-screen h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.loading-screen p {
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 90%;
+  line-height: 1.5;
+  text-align: center;
 }
 .loading-screen-blurred {
   position: fixed;
@@ -1323,5 +1335,55 @@ input:checked + .switch-slider-mini:before {
   }
 }
 
-
-
+/* --- リファクタリング用ユーティリティクラス (Task 3) --- */
+.btn-flex-1 {
+  flex: 1;
+  margin: 0 !important;
+}
+.btn-indigo {
+  background-color: #6366f1 !important;
+}
+.btn-indigo-dark {
+  background-color: #4f46e5 !important;
+}
+.btn-slate {
+  background-color: #334155 !important;
+  border: 1px solid #475569 !important;
+  color: #fff !important;
+}
+.btn-slate-dark {
+  background-color: #1e293b !important;
+  border: 1px solid #334155 !important;
+  color: #fff !important;
+}
+.export-button-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.export-preview-column {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.error-icon-large {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.error-text-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #f8fafc;
+}
+.error-text-desc {
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 240px;
+  margin-bottom: 24px;
+}
+.btn-padding-large {
+  padding: 12px 24px !important;
+}

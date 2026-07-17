@@ -193,3 +193,60 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     return null;
   }
 }
+
+/**
+ * 画像サイズに基づいたA4アスペクト比のデフォルト座標を返す
+ */
+export function getDefaultCorners(w: number, h: number): Point[] {
+  const a4Ratio = 1.4142;
+  let rectW = 0;
+  let rectH = 0;
+
+  if (h > w) {
+    // 縦画面の場合
+    rectW = w * 0.75;
+    rectH = rectW * a4Ratio;
+    if (rectH > h * 0.8) {
+      rectH = h * 0.8;
+      rectW = rectH / a4Ratio;
+    }
+  } else {
+    // 横画面の場合
+    rectH = h * 0.75;
+    rectW = rectH * a4Ratio;
+    if (rectW > w * 0.8) {
+      rectW = w * 0.8;
+      rectH = rectW / a4Ratio;
+    }
+  }
+
+  const startX = (w - rectW) / 2;
+  const startY = (h - rectH) / 2;
+  const endX = startX + rectW;
+  const endY = startY + rectH;
+
+  return [
+    { x: startX, y: startY },
+    { x: endX, y: startY },
+    { x: endX, y: endY },
+    { x: startX, y: endY }
+  ];
+}
+
+/**
+ * AIによる境界検出を試み、検出できなかった場合はデフォルトの境界を返す
+ */
+export async function detectDocumentWithFallback(
+  srcCanvas: HTMLCanvasElement,
+  aiModelLoaded: boolean
+): Promise<Point[]> {
+  let corners: Point[] | null = null;
+  if (aiModelLoaded) {
+    corners = await detectDocumentAI(srcCanvas);
+  }
+  if (!corners) {
+    corners = getDefaultCorners(srcCanvas.width, srcCanvas.height);
+  }
+  return corners;
+}
+

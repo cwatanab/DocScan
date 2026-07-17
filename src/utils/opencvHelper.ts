@@ -20,27 +20,27 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
 
   opencvLoadPromise = new Promise<void>((resolve, reject) => {
     // 既に準備完了している場合
-    if ((window as any).cvState === 'ready' || (window as any).cv) {
+    if (window.cvState === 'ready' || window.cv) {
       resolve();
       return;
     }
 
     // window.Moduleのコールバックを保証
-    if (!(window as any).Module) {
-      (window as any).Module = {
+    if (!window.Module) {
+      window.Module = {
         onRuntimeInitialized: () => {
-          (window as any).cvState = 'ready';
+          window.cvState = 'ready';
           window.dispatchEvent(new Event('opencv-ready'));
           resolve();
         }
       };
     } else {
-      const oldInit = (window as any).Module.onRuntimeInitialized;
-      (window as any).Module.onRuntimeInitialized = () => {
+      const oldInit = window.Module.onRuntimeInitialized;
+      window.Module.onRuntimeInitialized = () => {
         if (oldInit) {
           try { oldInit(); } catch (e) { console.error(e); }
         }
-        (window as any).cvState = 'ready';
+        window.cvState = 'ready';
         window.dispatchEvent(new Event('opencv-ready'));
         resolve();
       };
@@ -111,7 +111,7 @@ function distance(p1: Point, p2: Point): number {
  * @returns 補正後のCanvas
  */
 export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLCanvasElement {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) {
     console.error("OpenCV.js is not loaded.");
     return srcCanvas;
@@ -135,38 +135,46 @@ export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLC
   dstCanvas.width = maxWidth;
   dstCanvas.height = maxHeight;
 
-  const src = cv.imread(srcCanvas);
-  const dst = new cv.Mat();
+  let src: any = null;
+  let dst: any = null;
+  let srcCoords: any = null;
+  let dstCoords: any = null;
+  let M: any = null;
 
-  // 変換元の4頂点
-  const srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    tl.x, tl.y,
-    tr.x, tr.y,
-    br.x, br.y,
-    bl.x, bl.y
-  ]);
+  try {
+    src = cv.imread(srcCanvas);
+    dst = new cv.Mat();
 
-  // 変換後の4頂点
-  const dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    0, 0,
-    maxWidth, 0,
-    maxWidth, maxHeight,
-    0, maxHeight
-  ]);
+    // 変換元の4頂点
+    srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      tl.x, tl.y,
+      tr.x, tr.y,
+      br.x, br.y,
+      bl.x, bl.y
+    ]);
 
-  // 変換マトリクスを取得して適用
-  const M = cv.getPerspectiveTransform(srcCoords, dstCoords);
-  cv.warpPerspective(src, dst, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+    // 変換後の4頂点
+    dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      maxWidth, 0,
+      maxWidth, maxHeight,
+      0, maxHeight
+    ]);
 
-  // 結果をCanvasに書き出す
-  cv.imshow(dstCanvas, dst);
+    // 変換マトリクスを取得して適用
+    M = cv.getPerspectiveTransform(srcCoords, dstCoords);
+    cv.warpPerspective(src, dst, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
 
-  // メモリ解放
-  src.delete();
-  dst.delete();
-  srcCoords.delete();
-  dstCoords.delete();
-  M.delete();
+    // 結果をCanvasに書き出す
+    cv.imshow(dstCanvas, dst);
+  } finally {
+    // メモリ解放 (例外時にも確実に実行)
+    if (src) src.delete();
+    if (dst) dst.delete();
+    if (srcCoords) srcCoords.delete();
+    if (dstCoords) dstCoords.delete();
+    if (M) M.delete();
+  }
 
   return dstCanvas;
 }
@@ -182,180 +190,215 @@ export function warpImage(srcCanvas: HTMLCanvasElement, corners: Point[]): HTMLC
  * @returns フィルタ適用後の新しいCanvas
  */
 export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 'document'): HTMLCanvasElement {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return canvas;
 
-  const src = cv.imread(canvas);
-  const dst = new cv.Mat();
+  let src: any = null;
+  let dst: any = null;
+  let grayForStats: any = null;
+  let meanMat: any = null;
+  let stddevMat: any = null;
+  let ycrcb: any = null;
+  let channels: any = null;
+  let yChan: any = null;
+  let crChan: any = null;
+  let cbChan: any = null;
+  let lut: any = null;
+  let M: any = null;
+  let dilated: any = null;
+  let bg: any = null;
+  let rgb: any = null;
+
   const resultCanvas = document.createElement('canvas');
   resultCanvas.width = canvas.width;
   resultCanvas.height = canvas.height;
 
-  // --- 自動補正のための画像解析 (平均輝度の算出) ---
-  let meanVal = 128;
   try {
-    const grayForStats = new cv.Mat();
-    cv.cvtColor(src, grayForStats, cv.COLOR_RGBA2GRAY);
-    const meanMat = new cv.Mat();
-    const stddevMat = new cv.Mat();
-    cv.meanStdDev(grayForStats, meanMat, stddevMat);
-    meanVal = meanMat.doubleAt(0, 0);
-    grayForStats.delete();
-    meanMat.delete();
-    stddevMat.delete();
-  } catch (e) {
-    console.warn("Failed to calculate image stats for auto filter:", e);
-  }
+    src = cv.imread(canvas);
+    dst = new cv.Mat();
 
-  if (mode === 'color') {
-    // カラーモード: YCrCb 空間に変換し、輝度チャンネル Y のみに対して背景除算とコントラスト補正を行うことで色ズレを完全に防ぎます。
-    const ycrcb = new cv.Mat();
-    cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
-    cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
-
-    const channels = new cv.MatVector();
-    cv.split(ycrcb, channels);
-    
-    const yChan = channels.get(0);  // Y (輝度)
-    const crChan = channels.get(1); // Cr (色度)
-    const cbChan = channels.get(2); // Cb (色度)
-    
-    // ガンマ補正用LUTの作成
-    const lut = new cv.Mat(1, 256, cv.CV_8UC1);
-    const data = new Uint8Array(256);
-    
-    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する (コントラストと文字を引き締める調整)
-    let gamma = 1.2;
-    let minVal = 15;
-    let maxVal = 240;
-
-    if (meanVal < 130) {
-      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
-      gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
-      minVal = Math.max(10, 15 - Math.round((130 - meanVal) / 10));
-      maxVal = Math.max(190, 240 - Math.round((130 - meanVal) / 3));
-    } else {
-      // 明るい画像 ➔ ガンマを上げてコントラストを引き締める
-      gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
-      minVal = Math.min(25, 15 + Math.round((meanVal - 130) / 12));
+    // --- 自動補正のための画像解析 (平均輝度の算出) ---
+    let meanVal = 128;
+    try {
+      grayForStats = new cv.Mat();
+      cv.cvtColor(src, grayForStats, cv.COLOR_RGBA2GRAY);
+      meanMat = new cv.Mat();
+      stddevMat = new cv.Mat();
+      cv.meanStdDev(grayForStats, meanMat, stddevMat);
+      meanVal = meanMat.doubleAt(0, 0);
+    } catch (e) {
+      console.warn("Failed to calculate image stats for auto filter:", e);
+    } finally {
+      if (grayForStats) { grayForStats.delete(); grayForStats = null; }
+      if (meanMat) { meanMat.delete(); meanMat = null; }
+      if (stddevMat) { stddevMat.delete(); stddevMat = null; }
     }
-    
-    for (let i = 0; i < 256; i++) {
-      let val = i;
-      if (val <= minVal) {
-        val = 0;
-      } else if (val >= maxVal) {
-        val = 255;
+
+    if (mode === 'color') {
+      // カラーモード: YCrCb 空間に変換し、輝度チャンネル Y のみに対して背景除算とコントラスト補正を行うことで色ズレを完全に防ぎます。
+      ycrcb = new cv.Mat();
+      cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
+      cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
+
+      channels = new cv.MatVector();
+      cv.split(ycrcb, channels);
+      
+      yChan = channels.get(0);  // Y (輝度)
+      crChan = channels.get(1); // Cr (色度)
+      cbChan = channels.get(2); // Cb (色度)
+      
+      // ガンマ補正用LUTの作成
+      lut = new cv.Mat(1, 256, cv.CV_8UC1);
+      const data = new Uint8Array(256);
+      
+      // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する (コントラストと文字を引き締める調整)
+      let gamma = 1.2;
+      let minVal = 15;
+      let maxVal = 240;
+
+      if (meanVal < 130) {
+        // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
+        gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
+        minVal = Math.max(10, 15 - Math.round((130 - meanVal) / 10));
+        maxVal = Math.max(190, 240 - Math.round((130 - meanVal) / 3));
       } else {
-        val = ((val - minVal) / (maxVal - minVal)) * 255;
+        // 明るい画像 ➔ ガンマを上げてコントラストを引き締める
+        gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
+        minVal = Math.min(25, 15 + Math.round((meanVal - 130) / 12));
       }
-      const corrected = Math.pow(val / 255.0, gamma) * 255.0;
-      data[i] = Math.min(255, Math.max(0, corrected));
-    }
-    lut.data.set(data);
-
-    // Yチャンネルに対して背景除算（影消し）とLUT補正を適用
-    const kernelSize = 33;
-    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
-
-    const dilated = new cv.Mat();
-    const bg = new cv.Mat();
-    cv.dilate(yChan, dilated, M);
-    cv.medianBlur(dilated, bg, kernelSize);
-    
-    // 影ムラを除去（除算）し背景を白く飛ばす
-    cv.divide(yChan, bg, yChan, 255.0);
-    
-    // ガンマ・レベル補正を適用
-    cv.LUT(yChan, lut, yChan);
-    
-    dilated.delete();
-    bg.delete();
-    M.delete();
-    lut.delete();
-
-    // 再合成して RGB に変換してから RGBA に戻す (COLOR_YCrCb2RGBA は OpenCV.js で未定義のため)
-    cv.merge(channels, ycrcb);
-    const rgb = new cv.Mat();
-    cv.cvtColor(ycrcb, rgb, cv.COLOR_YCrCb2RGB);
-    cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
-    rgb.delete();
-
-    // リソースの解放
-    yChan.delete();
-    crChan.delete();
-    cbChan.delete();
-    channels.delete();
-    ycrcb.delete();
-  } else if (mode === 'mono') {
-    // モノクロ化（白黒2値化）
-    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-    cv.adaptiveThreshold(
-      dst,
-      dst,
-      255,
-      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-      cv.THRESH_BINARY,
-      15,
-      10
-    );
-  } else if (mode === 'document') {
-    // ドキュメントモード: 背景の影のムラを除算(Division)で完璧にフラットにした後、ガンマ補正でくっきり白黒化する
-    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-    
-    // 背景の推定 (膨張・平滑化)
-    const dilated = new cv.Mat();
-    const bg = new cv.Mat();
-    const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
-    cv.dilate(dst, dilated, M);
-    cv.medianBlur(dilated, bg, 33);
-    
-    // 影消し (背景を確実に白く飛ばすため 100% 適用に戻す)
-    cv.divide(dst, bg, dst, 255.0);
-    
-    // ガンマ補正 & しきい値ストレッチ (紙の白さを保証しつつ、文字の極端なギラつき・掠れを防ぐマイルドな設定)
-    const lut = new cv.Mat(1, 256, cv.CV_8UC1);
-    const data = new Uint8Array(256);
-    
-    // コントラストパラメータ (背景を白く、文字をくっきり引き締めるガンマ補正)
-    let gamma = 1.35;
-    let minVal = 20;
-    let maxVal = 230;
-
-    if (meanVal < 110) {
-      gamma = 1.1; // 暗い画像は少し明るく調整しつつコントラストも残す
-      minVal = 10;
-      maxVal = 220;
-    } else if (meanVal > 200) {
-      gamma = 1.5; // 明るい画像はさらに強めにコントラストを効かせる
-      minVal = 30;
-      maxVal = 240;
-    }
-    
-    for (let i = 0; i < 256; i++) {
-      let val = i;
-      if (val <= minVal) {
-        val = 0;
-      } else if (val >= maxVal) {
-        val = 255;
-      } else {
-        val = ((val - minVal) / (maxVal - minVal)) * 255;
+      
+      for (let i = 0; i < 256; i++) {
+        let val = i;
+        if (val <= minVal) {
+          val = 0;
+        } else if (val >= maxVal) {
+          val = 255;
+        } else {
+          val = ((val - minVal) / (maxVal - minVal)) * 255;
+        }
+        const corrected = Math.pow(val / 255.0, gamma) * 255.0;
+        data[i] = Math.min(255, Math.max(0, corrected));
       }
-      const corrected = Math.pow(val / 255.0, gamma) * 255.0;
-      data[i] = Math.min(255, Math.max(0, corrected));
-    }
-    lut.data.set(data);
-    cv.LUT(dst, lut, dst);
+      lut.data.set(data);
 
-    dilated.delete();
-    bg.delete();
-    M.delete();
-    lut.delete();
+      // Yチャンネルに対して背景除算（影消し）とLUT補正を適用
+      const kernelSize = 33;
+      M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
+
+      dilated = new cv.Mat();
+      bg = new cv.Mat();
+      cv.dilate(yChan, dilated, M);
+      cv.medianBlur(dilated, bg, kernelSize);
+      
+      // 影ムラを除去（除算）し背景を白く飛ばす
+      cv.divide(yChan, bg, yChan, 255.0);
+      
+      // ガンマ・レベル補正を適用
+      cv.LUT(yChan, lut, yChan);
+      
+      dilated.delete(); dilated = null;
+      bg.delete(); bg = null;
+      M.delete(); M = null;
+      lut.delete(); lut = null;
+
+      // 再合成して RGB に変換してから RGBA に戻す (COLOR_YCrCb2RGBA は OpenCV.js で未定義のため)
+      cv.merge(channels, ycrcb);
+      rgb = new cv.Mat();
+      cv.cvtColor(ycrcb, rgb, cv.COLOR_YCrCb2RGB);
+      cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
+      rgb.delete(); rgb = null;
+
+      // リソースの解放
+      yChan.delete(); yChan = null;
+      crChan.delete(); crChan = null;
+      cbChan.delete(); cbChan = null;
+      channels.delete(); channels = null;
+      ycrcb.delete(); ycrcb = null;
+    } else if (mode === 'mono') {
+      // モノクロ化（白黒2値化）
+      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+      cv.adaptiveThreshold(
+        dst,
+        dst,
+        255,
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY,
+        15,
+        10
+      );
+    } else if (mode === 'document') {
+      // ドキュメントモード: 背景の影のムラを除算(Division)で完璧にフラットにした後、ガンマ補正でくっきり白黒化する
+      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+      
+      // 背景の推定 (膨張・平滑化)
+      dilated = new cv.Mat();
+      bg = new cv.Mat();
+      M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
+      cv.dilate(dst, dilated, M);
+      cv.medianBlur(dilated, bg, 33);
+      
+      // 影消し (背景を確実に白く飛ばすため 100% 適用に戻す)
+      cv.divide(dst, bg, dst, 255.0);
+      
+      // ガンマ補正 & しきい値ストレッチ (紙の白さを保証しつつ、文字の極端なギラつき・掠れを防ぐマイルドな設定)
+      lut = new cv.Mat(1, 256, cv.CV_8UC1);
+      const data = new Uint8Array(256);
+      
+      // コントラストパラメータ (背景を白く、文字をくっきり引き締めるガンマ補正)
+      let gamma = 1.35;
+      let minVal = 20;
+      let maxVal = 230;
+
+      if (meanVal < 110) {
+        gamma = 1.1; // 暗い画像は少し明るく調整しつつコントラストも残す
+        minVal = 10;
+        maxVal = 220;
+      } else if (meanVal > 200) {
+        gamma = 1.5; // 明るい画像はさらに強めにコントラストを効かせる
+        minVal = 30;
+        maxVal = 240;
+      }
+      
+      for (let i = 0; i < 256; i++) {
+        let val = i;
+        if (val <= minVal) {
+          val = 0;
+        } else if (val >= maxVal) {
+          val = 255;
+        } else {
+          val = ((val - minVal) / (maxVal - minVal)) * 255;
+        }
+        const corrected = Math.pow(val / 255.0, gamma) * 255.0;
+        data[i] = Math.min(255, Math.max(0, corrected));
+      }
+      lut.data.set(data);
+      cv.LUT(dst, lut, dst);
+
+      dilated.delete(); dilated = null;
+      bg.delete(); bg = null;
+      M.delete(); M = null;
+      lut.delete(); lut = null;
+    }
+
+    cv.imshow(resultCanvas, dst);
+  } finally {
+    // メモリ解放 (例外時にも確実に実行して Wasm ヒープリークを防ぐ)
+    if (src) src.delete();
+    if (dst) dst.delete();
+    if (grayForStats) grayForStats.delete();
+    if (meanMat) meanMat.delete();
+    if (stddevMat) stddevMat.delete();
+    if (ycrcb) ycrcb.delete();
+    if (channels) channels.delete();
+    if (yChan) yChan.delete();
+    if (crChan) crChan.delete();
+    if (cbChan) cbChan.delete();
+    if (lut) lut.delete();
+    if (M) M.delete();
+    if (dilated) dilated.delete();
+    if (bg) bg.delete();
+    if (rgb) rgb.delete();
   }
-
-  cv.imshow(resultCanvas, dst);
-  src.delete();
-  dst.delete();
 
   return resultCanvas;
 }
@@ -366,24 +409,30 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
  * @returns 回転後の新しいCanvas
  */
 export function rotateImage90(canvas: HTMLCanvasElement, clockwise: boolean = true): HTMLCanvasElement {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return canvas;
 
-  const src = cv.imread(canvas);
-  const dst = new cv.Mat();
+  let src: any = null;
+  let dst: any = null;
   const resultCanvas = document.createElement('canvas');
 
-  // 時計回り(右) or 反時計回り(左) に回転
-  cv.rotate(src, dst, clockwise ? cv.ROTATE_90_CLOCKWISE : cv.ROTATE_90_COUNTERCLOCKWISE);
-  
-  // imshowするためにCanvasのサイズを入れ替える
-  resultCanvas.width = canvas.height;
-  resultCanvas.height = canvas.width;
+  try {
+    src = cv.imread(canvas);
+    dst = new cv.Mat();
 
-  cv.imshow(resultCanvas, dst);
-  
-  src.delete();
-  dst.delete();
+    // 時計回り(右) or 反時計回り(左) に回転
+    cv.rotate(src, dst, clockwise ? cv.ROTATE_90_CLOCKWISE : cv.ROTATE_90_COUNTERCLOCKWISE);
+    
+    // imshowするためにCanvas의 sizeを入れ替える
+    resultCanvas.width = canvas.height;
+    resultCanvas.height = canvas.width;
+
+    cv.imshow(resultCanvas, dst);
+  } finally {
+    // 例外時にも確実に解放
+    if (src) src.delete();
+    if (dst) dst.delete();
+  }
 
   return resultCanvas;
 }
@@ -394,7 +443,7 @@ export function rotateImage90(canvas: HTMLCanvasElement, clockwise: boolean = tr
  * @returns フォーカススコア
  */
 export function calculateFocusScore(canvas: HTMLCanvasElement): number {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return 0;
 
   const src = cv.imread(canvas);
@@ -432,7 +481,7 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
  * @returns 'color' | 'document'
  */
 export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'document' {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv || !cv.Mat) {
     return 'document'; // フォールバック
   }

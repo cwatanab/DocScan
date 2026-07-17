@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
 import { warpImage, rotateImage90, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
@@ -35,7 +35,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     try {
       const saved = localStorage.getItem('docscan_enable_ocr');
       return saved ? JSON.parse(saved) : false;
-    } catch (e) {
+    } catch {
       return false;
     }
   });
@@ -66,8 +66,18 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     imageRef
   });
 
+  // 表示サイズの更新
+  const updateDisplaySize = useCallback(() => {
+    if (imageRef.current) {
+      setDisplaySize({
+        width: imageRef.current.clientWidth,
+        height: imageRef.current.clientHeight
+      });
+    }
+  }, []);
+
   // 90度回転処理 (補正後の画像を回転。左右指定可能)
-  const handleRotate = (clockwise: boolean = true) => {
+  const handleRotate = useCallback((clockwise: boolean = true) => {
     if (!warpedImage) return;
     const img = new Image();
     img.onload = () => {
@@ -83,61 +93,10 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       }
     };
     img.src = warpedImage;
-  };
-
-  // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
-  useEffect(() => {
-    if (initialIsWarped && imageSize.width > 0 && corners.length === 4 && !warpedImage) {
-      handleWarpPreview(false); // 初回自動補正を実行
-    }
-  }, [initialIsWarped, imageSize, corners, warpedImage]);
-
-  // 画像読み込み完了時のサイズ取得
-  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget;
-    setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
-    updateDisplaySize();
-  };
-
-  // 表示サイズの更新
-  const updateDisplaySize = () => {
-    if (imageRef.current) {
-      setDisplaySize({
-        width: imageRef.current.clientWidth,
-        height: imageRef.current.clientHeight
-      });
-    }
-  };
-
-  // ウィンドウリサイズ時・方向変更時の処理
-  useEffect(() => {
-    window.addEventListener('resize', updateDisplaySize);
-    return () => window.removeEventListener('resize', updateDisplaySize);
-  }, []);
-
-  // 非表示(display: none)から表示に切り替わった瞬間に表示サイズを再計測・更新する
-  useEffect(() => {
-    if (!isWarped) {
-      const timer = setTimeout(() => {
-        updateDisplaySize();
-      }, 60);
-      return () => clearTimeout(timer);
-    }
-  }, [isWarped]);
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (draggedIndex === null) return;
-    const touch = e.touches[0];
-    handleMove(touch.clientX, touch.clientY);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (draggedIndex === null) return;
-    handleMove(e.clientX, e.clientY);
-  };
+  }, [warpedImage]);
 
   // 台形補正のプレビュー実行
-  const handleWarpPreview = (autoDetectFilter: boolean = false) => {
+  const handleWarpPreview = useCallback((autoDetectFilter: boolean = false) => {
     if (corners.length !== 4 || !imageRef.current) return;
 
     let targetFilterMode = filterMode;
@@ -162,17 +121,58 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setWarpedImage(url);
       setIsWarped(true);
     }
-  };
+  }, [corners, imageSize.width, imageSize.height, filterMode]);
+
+  // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
+  useEffect(() => {
+    if (initialIsWarped && imageSize.width > 0 && corners.length === 4 && !warpedImage) {
+      handleWarpPreview(false); // 初回自動補正を実行
+    }
+  }, [initialIsWarped, imageSize, corners, warpedImage, handleWarpPreview]);
+
+  // 画像読み込み完了時のサイズ取得
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+    updateDisplaySize();
+  }, [updateDisplaySize]);
+
+  // ウィンドウリサイズ時・方向変更時の処理
+  useEffect(() => {
+    window.addEventListener('resize', updateDisplaySize);
+    return () => window.removeEventListener('resize', updateDisplaySize);
+  }, [updateDisplaySize]);
+
+  // 非表示(display: none)から表示に切り替わった瞬間に表示サイズを再計測・更新する
+  useEffect(() => {
+    if (!isWarped) {
+      const timer = setTimeout(() => {
+        updateDisplaySize();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isWarped, updateDisplaySize]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (draggedIndex === null) return;
+    const touch = e.touches[0];
+    handleMove(touch.clientX, touch.clientY);
+  }, [draggedIndex, handleMove]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (draggedIndex === null) return;
+    handleMove(e.clientX, e.clientY);
+  }, [draggedIndex, handleMove]);
 
   // フィルタ切り替え時のプレビュー再実行
   useEffect(() => {
     if (isWarped) {
       handleWarpPreview(false); // 手動での切り替え時は自動判定をスキップ
     }
-  }, [filterMode]);
+  }, [filterMode, isWarped, handleWarpPreview]);
 
   // 確定して保存
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(() => {
     let rect: DOMRect | null = null;
     if (previewImageRef.current) {
       rect = previewImageRef.current.getBoundingClientRect();
@@ -186,7 +186,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
         onSave(url, filterMode, enableOcr, corners, rect);
       }
     }
-  };
+  }, [warpedImage, onSave, filterMode, enableOcr, corners]);
 
   return (
     <div className="editor-container"

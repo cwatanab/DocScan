@@ -1,18 +1,17 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 interface UseCameraStreamProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  cvReady: boolean;
 }
 
-export const useCameraStream = ({ videoRef, cvReady }: UseCameraStreamProps) => {
+export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
   const [cameraActive, setCameraActive] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   // カメラ停止
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -22,12 +21,10 @@ export const useCameraStream = ({ videoRef, cvReady }: UseCameraStreamProps) => 
       streamRef.current = null;
     }
     setCameraActive(false);
-  };
+  }, []);
 
   // カメラの起動
   useEffect(() => {
-    if (!cvReady) return;
-
     const startCamera = async () => {
       try {
         setErrorMsg(null);
@@ -60,7 +57,7 @@ export const useCameraStream = ({ videoRef, cvReady }: UseCameraStreamProps) => 
     return () => {
       stopCamera();
     };
-  }, [cvReady]);
+  }, [videoRef, stopCamera]);
 
   return {
     cameraActive,

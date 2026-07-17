@@ -23,11 +23,23 @@ export interface OcrResult {
 let detSession: ort.InferenceSession | null = null;
 let recSession: ort.InferenceSession | null = null;
 let ocrDict: string[] = [];
+let initPromise: Promise<{ detSession: ort.InferenceSession, recSession: ort.InferenceSession, dict: string[] }> | null = null;
+const progressListeners = new Set<(progress: number) => void>();
+
+const notifyProgress = (progress: number) => {
+  progressListeners.forEach(listener => {
+    try {
+      listener(progress);
+    } catch (e) {
+      console.warn('[OCR Init] Progress listener error:', e);
+    }
+  });
+};
 
 // OCRエンジン専用の画像前処理
 // (過剰な画像処理による文字のエッジ潰れや誤読を防ぐため、単純なグレースケール化のみを行います)
 function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return canvas;
 
   // メモリ負荷を考慮し、前処理時も最大辺2240px程度に抑えてOpenCVに入力
@@ -62,67 +74,86 @@ function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
 /**
  * ONNX Runtime Web OCR セッションを初期化する
  */
-async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{ detSession: ort.InferenceSession, recSession: ort.InferenceSession, dict: string[] }> {
+function initOcrEngine(onProgress?: (progress: number) => void): Promise<{ detSession: ort.InferenceSession, recSession: ort.InferenceSession, dict: string[] }> {
   if (detSession && recSession && ocrDict.length > 0) {
-    return { detSession, recSession, dict: ocrDict };
+    if (onProgress) {
+      try { onProgress(1.0); } catch (e) {}
+    }
+    return Promise.resolve({ detSession, recSession, dict: ocrDict });
   }
 
-  const yieldToUi = () => new Promise((resolve) => setTimeout(resolve, 35));
-
-  try {
-    if (onProgress) onProgress(0.1); 
-    await yieldToUi();
-
-    // WASM のパスとオプションを設定 (CORS・COEPエラー回避のためローカルからロード)
-    setupOrtEnvironment();
-    const base = import.meta.env.BASE_URL;
-
-    // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
-    const [detRes, recRes, dictRes] = await Promise.all([
-      fetch(`${base}models/PP-OCRv6_small_det_onnx/inference.onnx`),
-      fetch(`${base}models/PP-OCRv6_small_rec_onnx/inference.onnx`),
-      fetch(`${base}models/ppocrv6_dict.txt`)
-    ]);
-
-    if (!detRes.ok || !recRes.ok || !dictRes.ok) {
-      throw new Error('Failed to download OCR models from public/models/');
-    }
-    if (onProgress) onProgress(0.5);
-    await yieldToUi();
-
-    const [detBytes, recBytes, dictText] = await Promise.all([
-      detRes.arrayBuffer(),
-      recRes.arrayBuffer(),
-      dictRes.text()
-    ]);
-    ocrDict = dictText.split(/\r?\n/);
-
-    if (onProgress) onProgress(0.7);
-    await yieldToUi();
-
-    // ONNX Runtime セッションの構築
-    if (!detSession) {
-      detSession = await ort.InferenceSession.create(new Uint8Array(detBytes), {
-        executionProviders: ['wasm'],
-      });
-    }
-    if (onProgress) onProgress(0.85);
-    await yieldToUi();
-
-    if (!recSession) {
-      recSession = await ort.InferenceSession.create(new Uint8Array(recBytes), {
-        executionProviders: ['wasm'],
-      });
-    }
-
-    if (onProgress) onProgress(1.0);
-    await yieldToUi();
-
-    return { detSession, recSession, dict: ocrDict };
-  } catch (err) {
-    console.error('Failed to initialize ONNX Runtime Web OCR engine:', err);
-    throw err;
+  if (onProgress) {
+    progressListeners.add(onProgress);
   }
+
+  if (initPromise) {
+    return initPromise;
+  }
+
+  initPromise = (async () => {
+    const yieldToUi = () => new Promise((resolve) => setTimeout(resolve, 35));
+
+    try {
+      notifyProgress(0.1); 
+      await yieldToUi();
+
+      // WASM のパスとオプションを設定 (CORS・COEPエラー回避のためローカルからロード)
+      setupOrtEnvironment();
+      const base = import.meta.env.BASE_URL;
+
+      // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
+      const [detRes, recRes, dictRes] = await Promise.all([
+        fetch(`${base}models/PP-OCRv6_small_det_onnx/inference.onnx`),
+        fetch(`${base}models/PP-OCRv6_small_rec_onnx/inference.onnx`),
+        fetch(`${base}models/ppocrv6_dict.txt`)
+      ]);
+
+      if (!detRes.ok || !recRes.ok || !dictRes.ok) {
+        throw new Error('Failed to download OCR models from public/models/');
+      }
+      notifyProgress(0.5);
+      await yieldToUi();
+
+      const [detBytes, recBytes, dictText] = await Promise.all([
+        detRes.arrayBuffer(),
+        recRes.arrayBuffer(),
+        dictRes.text()
+      ]);
+      ocrDict = dictText.split(/\r?\n/);
+
+      notifyProgress(0.7);
+      await yieldToUi();
+
+      // ONNX Runtime セッションの構築
+      if (!detSession) {
+        detSession = await ort.InferenceSession.create(new Uint8Array(detBytes), {
+          executionProviders: ['wasm'],
+        });
+      }
+      notifyProgress(0.85);
+      await yieldToUi();
+
+      if (!recSession) {
+        recSession = await ort.InferenceSession.create(new Uint8Array(recBytes), {
+          executionProviders: ['wasm'],
+        });
+      }
+
+      notifyProgress(1.0);
+      await yieldToUi();
+
+      return { detSession, recSession, dict: ocrDict };
+    } catch (err) {
+      console.error('Failed to initialize ONNX Runtime Web OCR engine:', err);
+      // エラー発生時は再試行できるようにシングルトンPromiseをリセット
+      initPromise = null;
+      throw err;
+    } finally {
+      progressListeners.clear();
+    }
+  })();
+
+  return initPromise;
 }
 
 /**
@@ -162,7 +193,7 @@ function getRotatedRectPoints(rect: any): number[][] {
  * (背景の0ピクセルを排除し、正確な確信度を計算するためにマスクを使用)
  */
 function calculateBoxScore(predMat: any, contour: any): number {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return 0.5;
 
   const rect = cv.boundingRect(contour);
@@ -213,7 +244,7 @@ function dbPostProcess(
   origHeight: number,
   unclipRatio: number
 ): number[][][] {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return [];
 
   const predMat = new cv.Mat(predHeight, predWidth, cv.CV_32FC1);
@@ -310,7 +341,7 @@ function sortPoints(points: number[][]): number[][] {
  * 画像から多角形領域を切り出して水平にする (Perspective Warp)
  */
 function getCropImage(canvas: HTMLCanvasElement, box: number[][]): HTMLCanvasElement {
-  const cv = (window as any).cv;
+  const cv = window.cv;
   if (!cv) return canvas;
 
   const src = cv.imread(canvas);
@@ -563,6 +594,15 @@ export async function performOcr(
     const textLines: string[] = [];
 
     for (let i = 0; i < boxes.length; i++) {
+      // メインスレッドを定期的に解放し、OCR処理中もローディング等のUIアニメーションが滑らかに動き続けるようにする
+      await yieldToUi();
+
+      if (onProgress) {
+        // 進捗を 0.90 から 0.99 に向けて、認識した行数に応じて滑らかに進める
+        const progress = 0.90 + (i / boxes.length) * 0.09;
+        onProgress(progress);
+      }
+
       const box = boxes[i];
       let cropCanvas = getCropImage(processedCanvas, box);
 

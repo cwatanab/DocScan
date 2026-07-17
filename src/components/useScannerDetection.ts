@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Point } from '../utils/opencvHelper';
 import { calculateFocusScore } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
@@ -9,6 +9,18 @@ export interface FrameCache {
   corners: Point[];
   score: number;
 }
+
+/**
+ * キャッシュフレームの明示的メモリ解放
+ */
+const discardFrame = (frame: FrameCache) => {
+  try {
+    frame.canvas.width = 0;
+    frame.canvas.height = 0;
+  } catch (e) {
+    console.warn("Failed to discard canvas memory:", e);
+  }
+};
 
 interface UseScannerDetectionProps {
   cameraActive: boolean;
@@ -67,7 +79,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
   /**
    * 毎フレームの検出とキャッシュ蓄積を処理する
    */
-  const processDetectionFrame = async (canvas: HTMLCanvasElement) => {
+  const processDetectionFrame = useCallback(async (canvas: HTMLCanvasElement) => {
     if (!aiModelLoaded) return null;
 
     const now = performance.now();
@@ -146,7 +158,10 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
         });
 
         if (recentFramesRef.current.length > 8) {
-          recentFramesRef.current.shift();
+          const removed = recentFramesRef.current.shift();
+          if (removed) {
+            discardFrame(removed);
+          }
         }
 
         lastFocusScoreTimeRef.current = now;
@@ -156,12 +171,12 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
     }
 
     return smoothCornersRef.current;
-  };
+  }, [aiModelLoaded]);
 
   /**
    * キャッシュされたフレームからベストショットを取得する
    */
-  const getBestCachedFrame = () => {
+  const getBestCachedFrame = useCallback(() => {
     const cachedFrames = recentFramesRef.current;
     if (cachedFrames.length === 0) return null;
 
@@ -172,17 +187,18 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
     }
     return bestFrame;
-  };
+  }, []);
 
   /**
    * キャッシュと状態のリセット
    */
-  const resetDetection = () => {
+  const resetDetection = useCallback(() => {
+    recentFramesRef.current.forEach(discardFrame);
     recentFramesRef.current = [];
     smoothCornersRef.current = null;
     cachedCornersRef.current = null;
     lastValidCornersRef.current = null;
-  };
+  }, []);
 
   return {
     aiLoading,

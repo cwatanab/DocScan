@@ -1,11 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Image as ImageIcon, Sparkles } from 'lucide-react';
-import { loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
-import { detectDocumentAI } from '../utils/docSegHelper';
+import { detectDocumentWithFallback, getDefaultCorners } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
 import { resizeCanvas } from '../utils/imageExportHelper';
-import { OpenCvInitializer } from './OpenCvInitializer';
 import { useScannerDetection } from './useScannerDetection';
 
 interface CameraScannerProps {
@@ -13,80 +11,19 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
-const getDefaultCorners = (w: number, h: number): Point[] => {
-  const a4Ratio = 1.4142;
-  let rectW = 0;
-  let rectH = 0;
-
-  if (h > w) {
-    // 縦画面の場合: 縦長のA4 (高さ = 幅 * 1.414)
-    rectW = w * 0.75;
-    rectH = rectW * a4Ratio;
-    if (rectH > h * 0.8) {
-      rectH = h * 0.8;
-      rectW = rectH / a4Ratio;
-    }
-  } else {
-    // 横画面の場合: 横長のA4 (幅 = 高さ * 1.414)
-    rectH = h * 0.75;
-    rectW = rectH * a4Ratio;
-    if (rectW > w * 0.8) {
-      rectW = w * 0.8;
-      rectH = rectW / a4Ratio;
-    }
-  }
-
-  const startX = (w - rectW) / 2;
-  const startY = (h - rectH) / 2;
-  const endX = startX + rectW;
-  const endY = startY + rectH;
-
-  return [
-    { x: startX, y: startY },
-    { x: endX, y: startY },
-    { x: endX, y: endY },
-    { x: startX, y: endY }
-  ];
-};
-
 export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const [cvReady, setCvReady] = useState(false);
-  const [cvError, setCvError] = useState<string | null>(null);
-
-  // OpenCVのロード状態をチェック＆動的ロード
-  useEffect(() => {
-    let isMounted = true;
-
-    loadOpenCV(30000)
-      .then(() => {
-        if (isMounted) {
-          setCvReady(true);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          console.error("[CameraScanner] OpenCV load failed:", err);
-          setCvError(err.message || 'OpenCV.js の読み込みに失敗しました。');
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   // カメラストリーム制御のカスタムフック呼び出し
   const {
     cameraActive,
     errorMsg,
     stopCamera: stopCameraStream,
     animationFrameRef
-  } = useCameraStream({ videoRef, cvReady });
+  } = useCameraStream({ videoRef });
 
   // AI 境界検出とキャッシュバッファのカスタムフック呼び出し
   const {
@@ -178,7 +115,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [cameraActive, aiModelLoaded]);
+  }, [cameraActive, aiModelLoaded, processDetectionFrame, animationFrameRef]);
 
   // シャッターを切る (キャッシュバッファから最もピントが合った＝エッジの立った写真を自動選択)
   const handleShutter = async () => {
@@ -207,13 +144,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           const resized = resizeCanvas(captureCanvas, 1600);
           const dataUrl = resized.toDataURL('image/jpeg', 0.92);
           
-          let rawCorners: Point[] | null = null;
-          if (aiModelLoaded) {
-            rawCorners = await detectDocumentAI(resized);
-          }
-          if (!rawCorners) {
-            rawCorners = getDefaultCorners(resized.width, resized.height);
-          }
+          const rawCorners = await detectDocumentWithFallback(resized, aiModelLoaded);
           
           stopCamera();
           onCapture(dataUrl, rawCorners);
@@ -243,13 +174,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         if (ctx) {
           ctx.drawImage(img, 0, 0);
           
-          let corners: Point[] | null = null;
-          if (aiModelLoaded) {
-            corners = await detectDocumentAI(tempCanvas);
-          }
-          if (!corners) {
-            corners = getDefaultCorners(tempCanvas.width, tempCanvas.height);
-          }
+          const corners = await detectDocumentWithFallback(tempCanvas, aiModelLoaded);
           
           stopCamera();
           onCapture(dataUrl, corners);
@@ -260,10 +185,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     reader.readAsDataURL(file);
   };
 
-
-  if (!cvReady) {
-    return <OpenCvInitializer cvError={cvError} />;
-  }
 
   return (
     <div ref={containerRef} className="scanner-container">
