@@ -74,8 +74,8 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
 
     // サーバーからモデルデータと辞書をダウンロード
     const [detRes, recRes, dictRes] = await Promise.all([
-      fetch('/models/det.onnx'),
-      fetch('/models/rec.onnx'),
+      fetch('/models/PP-OCRv6_medium_det_onnx/inference.onnx'),
+      fetch('/models/PP-OCRv6_small_rec_onnx/inference.onnx'),
       fetch('/models/ppocrv6_dict.txt')
     ]);
 
