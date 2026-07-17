@@ -72,8 +72,9 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     if (onProgress) onProgress(0.1); 
     await yieldToUi();
 
-    // WASM のパスとオプションを設定
-    ort.env.wasm.wasmPaths = window.location.origin + '/';
+    // WASM のパスとオプションを設定 (Cloudflare Pages の 25MB 制限回避のため CDN からロード)
+    const ortVersion = __ORT_VERSION__;
+    ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ortVersion}/dist/`;
     ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 4);
 
     if (onProgress) onProgress(0.2);

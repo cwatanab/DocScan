@@ -2,9 +2,38 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import { readFileSync, promises as fs } from 'fs'
+import { join } from 'path'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+const ORT_VERSION = pkg.dependencies['onnxruntime-web'].replace(/[^0-9.]/g, '')
+
+// CDNで読み込むため、ビルド成果物から不要になったWASMファイルを削除するプラグイン
+const removeWasmPlugin = () => {
+  return {
+    name: 'remove-wasm',
+    async closeBundle() {
+      const distDir = join(process.cwd(), 'dist', 'assets')
+      try {
+        const files = await fs.readdir(distDir)
+        for (const file of files) {
+          if (file.startsWith('ort-wasm-') && file.endsWith('.wasm')) {
+            await fs.unlink(join(distDir, file))
+            console.log(`[RemoveWasm] Removed CDN-delegated WASM asset: ${file}`)
+          }
+        }
+      } catch (err) {
+        console.warn('[RemoveWasm] Error removing wasm assets:', err)
+      }
+    }
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __ORT_VERSION__: JSON.stringify(ORT_VERSION)
+  },
   server: {
     host: true,
     port: 5173,
@@ -19,6 +48,7 @@ export default defineConfig({
   plugins: [
     react(),
     basicSsl(),
+    removeWasmPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
@@ -59,7 +89,7 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /ort-wasm-.*\.(wasm|mjs)(\?.*)?$/,
+            urlPattern: /^(https:\/\/cdn\.jsdelivr\.net\/npm\/onnxruntime-web@|.*\/)ort-wasm-.*\.(wasm|mjs)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'ort-wasm-cache',
