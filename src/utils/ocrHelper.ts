@@ -75,7 +75,7 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     // WASM のパスとオプションを設定 (CORS・COEPエラー回避のためローカルからロード)
     const base = import.meta.env.BASE_URL;
     ort.env.wasm.wasmPaths = base;
-    ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 4);
+    ort.env.wasm.numThreads = 1;
 
     // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
     const [detRes, recRes, dictRes] = await Promise.all([
