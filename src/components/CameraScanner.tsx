@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image as ImageIcon, Sparkles } from 'lucide-react';
 import { detectDocument, calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
+import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
 import { resizeCanvas } from '../utils/imageExportHelper';
 import { OpenCvInitializer } from './OpenCvInitializer';
@@ -33,6 +34,29 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   
   const [cvReady, setCvReady] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
+
+  // AI 検出用 state
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiModelLoaded, setAiModelLoaded] = useState(isAISegEngineLoaded());
+
+  // AIモデルのプリロード
+  useEffect(() => {
+    if (aiEnabled && !aiModelLoaded && !aiLoading) {
+      setAiLoading(true);
+      initDocSegEngine()
+        .then(() => {
+          setAiModelLoaded(true);
+          console.log("[CameraScanner] AI segmentation model preloaded.");
+        })
+        .catch(err => {
+          console.error("[CameraScanner] Failed to preload AI model:", err);
+        })
+        .finally(() => {
+          setAiLoading(false);
+        });
+    }
+  }, [aiEnabled, aiModelLoaded, aiLoading]);
 
   // OpenCVのロード状態をチェック＆動的ロード
   useEffect(() => {
@@ -112,15 +136,32 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
 
           const now = performance.now();
           
-          // 1. ドキュメントの輪郭検出 (計算負荷を考慮し 150ms 間隔で間引き)
-          if (now - lastDetectionTime > DETECTION_INTERVAL) {
-            const detected = detectDocument(canvas);
-            if (detected) {
-              cachedCorners = detected;
-              lastValidCorners = detected;
-              lastSeenDetectionTime = now;
+          // 1. ドキュメントの輪郭検出 (計算負荷を考慮し間引き。AIの場合は 300ms 間隔)
+          const currentInterval = (aiEnabled && aiModelLoaded) ? 300 : DETECTION_INTERVAL;
+          
+          if (now - lastDetectionTime > currentInterval) {
+            if (aiEnabled && aiModelLoaded) {
+              // プレビュー表示の更新をブロックしないよう非同期（Promise）でAI推論を走らせる
+              detectDocumentAI(canvas).then(detected => {
+                if (detected) {
+                  cachedCorners = detected;
+                  lastValidCorners = detected;
+                  lastSeenDetectionTime = performance.now();
+                } else {
+                  cachedCorners = null;
+                }
+              }).catch(err => {
+                console.error("AI detection error during preview: ", err);
+              });
             } else {
-              cachedCorners = null;
+              const detected = detectDocument(canvas);
+              if (detected) {
+                cachedCorners = detected;
+                lastValidCorners = detected;
+                lastSeenDetectionTime = now;
+              } else {
+                cachedCorners = null;
+              }
             }
             lastDetectionTime = now;
           }
@@ -241,7 +282,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   }, [cameraActive]);
 
   // シャッターを切る (キャッシュバッファから最もピントが合った＝エッジの立った写真を自動選択)
-  const handleShutter = () => {
+  const handleShutter = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     
     try {
@@ -274,7 +315,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           // 縮小処理を適用 (メモリ・処理フリーズ対策)
           const resized = resizeCanvas(captureCanvas, 1600);
           const dataUrl = resized.toDataURL('image/jpeg', 0.92);
-          const rawCorners = detectDocument(resized) || getDefaultCorners(resized.width, resized.height);
+          
+          let rawCorners: Point[] | null = null;
+          if (aiEnabled && aiModelLoaded) {
+            rawCorners = await detectDocumentAI(resized);
+          }
+          if (!rawCorners) {
+            rawCorners = detectDocument(resized) || getDefaultCorners(resized.width, resized.height);
+          }
           
           stopCamera();
           onCapture(dataUrl, rawCorners);
@@ -296,14 +344,22 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = img.width;
         tempCanvas.height = img.height;
         const ctx = tempCanvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0);
-          const corners = detectDocument(tempCanvas) || getDefaultCorners(tempCanvas.width, tempCanvas.height);
+          
+          let corners: Point[] | null = null;
+          if (aiEnabled && aiModelLoaded) {
+            corners = await detectDocumentAI(tempCanvas);
+          }
+          if (!corners) {
+            corners = detectDocument(tempCanvas) || getDefaultCorners(tempCanvas.width, tempCanvas.height);
+          }
+          
           stopCamera();
           onCapture(dataUrl, corners);
         }
@@ -321,6 +377,19 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     <div ref={containerRef} className="scanner-container">
       {/* ビデオプレビュー (全画面表示) */}
       <div className="scanner-preview">
+        {/* AIアシストトグルボタン */}
+        {!errorMsg && (
+          <button
+            onClick={() => setAiEnabled(!aiEnabled)}
+            className={`scanner-ai-toggle-btn ${aiEnabled ? 'active' : ''}`}
+            title="AI境界検出のオン/オフ"
+            type="button"
+          >
+            <Sparkles className={`ai-icon ${aiLoading ? 'spinning' : ''}`} style={{ width: '16px', height: '16px' }} />
+            <span>{aiEnabled ? (aiModelLoaded ? 'AI ON' : 'AI 読込中...') : 'AI OFF'}</span>
+          </button>
+        )}
+
         {errorMsg ? (
           <div className="scanner-error-container">
             <p>{errorMsg}</p>
