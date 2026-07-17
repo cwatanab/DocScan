@@ -8,14 +8,14 @@ let isInitializing = false;
 /**
  * AIドキュメントセグメンテーションエンジンの初期化
  */
-export async function initDocSegEngine(): Promise<ort.InferenceSession> {
+export async function initDocSegEngine(): Promise<ort.InferenceSession | null> {
   if (docSegSession) return docSegSession;
   if (isInitializing) {
     // 初期化中の場合は完了するまで待つ
     while (isInitializing) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    if (docSegSession) return docSegSession;
+    return docSegSession;
   }
 
   isInitializing = true;
@@ -23,15 +23,16 @@ export async function initDocSegEngine(): Promise<ort.InferenceSession> {
   ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ortVersion}/dist/`;
 
   try {
-    console.log("[AI Seg] Loading document segmentation model...");
-    docSegSession = await ort.InferenceSession.create('https://huggingface.co/Jwalit/kyc-document-corner-detector-v2/resolve/main/model.onnx', {
+    console.log("[AI Seg] Loading document segmentation model from local...");
+    docSegSession = await ort.InferenceSession.create('/models/doc_seg.onnx', {
       executionProviders: ['wasm'],
     });
     console.log("[AI Seg] Model loaded successfully.");
     return docSegSession;
   } catch (err) {
-    console.error('[AI Seg] Failed to load Document Segmentation Model:', err);
-    throw err;
+    console.warn('[AI Seg] Document Segmentation Model not found or failed to load. Falling back to OpenCV.');
+    docSegSession = null;
+    return null;
   } finally {
     isInitializing = false;
   }
@@ -59,6 +60,9 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
   try {
     // エンジンの初期化・取得
     const session = await initDocSegEngine();
+    if (!session) {
+      return null; // モデルがない場合は自動でOpenCV検出にフォールバック
+    }
 
     const width = srcCanvas.width;
     const height = srcCanvas.height;

@@ -103,10 +103,10 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /^https:\/\/huggingface\.co\/.*\/resolve\/main\/.*\.onnx$/,
+            urlPattern: /\/models\/.*\.(onnx|txt)$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'huggingface-models-cache',
+              cacheName: 'models-cache',
               expiration: {
                 maxEntries: 10,
                 maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year

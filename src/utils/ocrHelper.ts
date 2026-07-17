@@ -77,18 +77,15 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ortVersion}/dist/`;
     ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 4);
 
-    if (onProgress) onProgress(0.2);
-    await yieldToUi();
-
-    // サーバーおよびCDNからモデルデータと辞書をダウンロード
+    // サーバーからモデルデータと辞書をダウンロード (CORS・COEPエラー回避のためローカルからフェッチ)
     const [detRes, recRes, dictRes] = await Promise.all([
-      fetch('https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_onnx/resolve/main/inference.onnx'),
-      fetch('https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/main/inference.onnx'),
+      fetch('/models/PP-OCRv6_small_det_onnx/inference.onnx'),
+      fetch('/models/PP-OCRv6_small_rec_onnx/inference.onnx'),
       fetch('/models/ppocrv6_dict.txt')
     ]);
 
     if (!detRes.ok || !recRes.ok || !dictRes.ok) {
-      throw new Error('Failed to download OCR models from CDN / public folder');
+      throw new Error('Failed to download OCR models from public/models/');
     }
     if (onProgress) onProgress(0.5);
     await yieldToUi();
