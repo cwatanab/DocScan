@@ -76,7 +76,7 @@ async function initOcrEngine(onProgress?: (progress: number) => void): Promise<{
     const [detRes, recRes, dictRes] = await Promise.all([
       fetch('/models/det.onnx'),
       fetch('/models/rec.onnx'),
-      fetch('/models/ppocrv5_dict.txt')
+      fetch('/models/ppocrv6_dict.txt')
     ]);
 
     if (!detRes.ok || !recRes.ok || !dictRes.ok) {
