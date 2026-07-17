@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon, Sparkles, RefreshCw } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, RefreshCw, X } from 'lucide-react';
 import { detectDocument, calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
@@ -455,14 +455,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
               </div>
             </div>
 
-            {/* キャッシュクリア＆再起動ボタン (左下フローティング) */}
-            {!errorMsg && (
+            {/* 閉じるボタン (右上フローティング) */}
+            {onCancel && (
               <button
-                onClick={handleClearCacheAndReload}
+                onClick={onCancel}
                 style={{
                   position: 'absolute',
-                  left: '16px',
-                  bottom: '16px',
+                  right: '16px',
+                  top: 'calc(16px + env(safe-area-inset-top, 0px))',
                   width: '38px',
                   height: '38px',
                   borderRadius: '50%',
@@ -476,13 +476,12 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                   cursor: 'pointer',
                   zIndex: 30,
                   boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
-                  transition: 'all 0.2s ease',
                   padding: 0,
                 }}
-                title="キャッシュをクリアして再起動"
+                title="閉じる"
                 type="button"
               >
-                <RefreshCw style={{ width: '18px', height: '18px' }} />
+                <X style={{ width: '20px', height: '20px' }} />
               </button>
             )}
           </>
@@ -491,17 +490,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
 
       {/* コントロールバー */}
       <div className="scanner-controls">
-        {onCancel ? (
-          <button
-            onClick={onCancel}
-            className="scanner-close-btn"
-          >
-            閉じる
-          </button>
-        ) : (
-          /* レイアウトの対称性を維持し、シャッターを完全に中央に固定するためのダミースペース */
-          <div style={{ width: '60px', visibility: 'hidden' }} />
-        )}
+        <button
+          onClick={handleClearCacheAndReload}
+          className="scanner-btn-secondary"
+          title="キャッシュをクリアして再起動"
+          type="button"
+        >
+          <RefreshCw style={{ width: '20px', height: '20px' }} />
+        </button>
 
         <button
           onClick={handleShutter}
