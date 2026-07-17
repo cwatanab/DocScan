@@ -42,7 +42,16 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp'
     },
     watch: {
-      ignored: ['**/SCAN_*', '**/*.pdf', '**/*.png', '**/*.jpeg', '**/*.jpg']
+      ignored: [
+        '**/SCAN_*',
+        '**/*.pdf',
+        '**/*.png',
+        '**/*.jpeg',
+        '**/*.jpg',
+        '**/*.onnx',
+        '**/*.ort',
+        '**/public/models/**'
+      ]
     }
   },
   plugins: [
