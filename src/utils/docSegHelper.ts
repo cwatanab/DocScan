@@ -132,12 +132,43 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     }
 
     // ドキュメントが見つからない（写っていない）と判断された場合は null
-    // 境界閾値を 0.35 に設定し、緩めながらも誤検出を防ぐ
-    if (confidence < 0.35) {
+    // 信頼度閾値を 0.45 に引き上げて曖昧な誤検出を防止
+    if (confidence < 0.45) {
       return null;
     }
 
-    // 4. 座標を元の画像サイズにスケールバック
+    // 4. 誤検出フィルター: 画面全体を囲んでしまう巨大な枠線を排除
+    const x0 = coordsData[0]; const y0 = coordsData[1]; // TL
+    const x1 = coordsData[2]; const y1 = coordsData[3]; // TR
+    const x2 = coordsData[4]; const y2 = coordsData[5]; // BR
+    const x3 = coordsData[6]; const y3 = coordsData[7]; // BL
+
+    // (A) 四隅張り付きチェック: 各点が画面の端っこ (マージン 5%) に位置しているか
+    const margin = 0.05;
+    const isTlAtCorner = x0 < margin && y0 < margin;
+    const isTrAtCorner = x1 > (1 - margin) && y1 < margin;
+    const isBrAtCorner = x2 > (1 - margin) && y2 > (1 - margin);
+    const isBlAtCorner = x3 < margin && y3 > (1 - margin);
+
+    if (isTlAtCorner && isTrAtCorner && isBrAtCorner && isBlAtCorner) {
+      console.log("[AI Seg] Ignored screen-wide boundary detection (corner stickiness).");
+      return null;
+    }
+
+    // (B) 検出面積チェック: 四角形の面積が画面全体の 85% 以上を占めているか (Shoelace formula)
+    const area = 0.5 * Math.abs(
+      (x0 * y1 - y0 * x1) +
+      (x1 * y2 - y1 * x2) +
+      (x2 * y3 - y2 * x3) +
+      (x3 * y0 - y3 * x0)
+    );
+
+    if (area > 0.85) {
+      console.log(`[AI Seg] Ignored large boundary detection (area ratio: ${area.toFixed(3)}).`);
+      return null;
+    }
+
+    // 5. 座標を元の画像サイズにスケールバック
     // coordsDataの順序: TL(左上), TR(右上), BR(右下), BL(左下) の x, y ペア
     const pts: Point[] = [
       {
