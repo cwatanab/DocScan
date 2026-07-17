@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Image as ImageIcon, Sparkles, RefreshCw, X } from 'lucide-react';
-import { detectDocument, calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
+import { calculateFocusScore, loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
@@ -159,14 +159,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 console.error("AI detection error during preview: ", err);
               });
             } else {
-              const detected = detectDocument(canvas);
-              if (detected) {
-                cachedCorners = detected;
-                lastValidCorners = detected;
-                lastSeenDetectionTime = now;
-              } else {
-                cachedCorners = null;
-              }
+              cachedCorners = null;
             }
             lastDetectionTime = now;
           }
@@ -326,7 +319,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
             rawCorners = await detectDocumentAI(resized);
           }
           if (!rawCorners) {
-            rawCorners = detectDocument(resized) || getDefaultCorners(resized.width, resized.height);
+            rawCorners = getDefaultCorners(resized.width, resized.height);
           }
           
           stopCamera();
@@ -362,7 +355,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
             corners = await detectDocumentAI(tempCanvas);
           }
           if (!corners) {
-            corners = detectDocument(tempCanvas) || getDefaultCorners(tempCanvas.width, tempCanvas.height);
+            corners = getDefaultCorners(tempCanvas.width, tempCanvas.height);
           }
           
           stopCamera();
