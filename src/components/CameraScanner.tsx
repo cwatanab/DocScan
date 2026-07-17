@@ -36,7 +36,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   const [cvError, setCvError] = useState<string | null>(null);
 
   // AI 検出用 state
-  const [aiEnabled, setAiEnabled] = useState(true);
+  const aiEnabled = true;
   const [aiLoading, setAiLoading] = useState(false);
   const [aiModelLoaded, setAiModelLoaded] = useState(isAISegEngineLoaded());
 
@@ -377,18 +377,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     <div ref={containerRef} className="scanner-container">
       {/* ビデオプレビュー (全画面表示) */}
       <div className="scanner-preview">
-        {/* AIアシストトグルボタン */}
-        {!errorMsg && (
-          <button
-            onClick={() => setAiEnabled(!aiEnabled)}
-            className={`scanner-ai-toggle-btn ${aiEnabled ? 'active' : ''}`}
-            title="AI境界検出のオン/オフ"
-            type="button"
-          >
-            <Sparkles className={`ai-icon ${aiLoading ? 'spinning' : ''}`} style={{ width: '16px', height: '16px' }} />
-            <span>{aiEnabled ? (aiModelLoaded ? 'AI ON' : 'AI 読込中...') : 'AI OFF'}</span>
-          </button>
-        )}
 
         {errorMsg ? (
           <div className="scanner-error-container">
