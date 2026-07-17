@@ -51,10 +51,7 @@ export const OpenCvInitializer: React.FC<OpenCvInitializerProps> = ({ cvError })
       ) : (
         <>
           <Loader2 className="spinner spinner-large" style={{ color: '#6366f1', marginBottom: '16px' }} />
-          <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>OpenCV.js 初期化中</h3>
-          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '90%', lineHeight: '1.5', textAlign: 'center' }}>
-            画像処理エンジン（約10MB）をロードしています。初回起動には数秒かかる場合があります。
-          </p>
+          <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>初期化中</h3>
         </>
       )}
     </div>
