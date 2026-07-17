@@ -35,8 +35,15 @@ function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const src = cv.imread(inputCanvas);
   const dst = new cv.Mat();
   
-  // 1. グレースケール化のみを適用
+  // 1. グレースケール化を適用
   cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+
+  // 2. マイルドなアンシャープマスク (手ブレ・ピンボケによる輪郭のボヤけを引き締める)
+  // 文字のエッジに悪影響を与えないよう、以前(1.6 / -0.6)より遥かにマイルドな重み(1.3 / -0.3)で適用します。
+  const blurred = new cv.Mat();
+  cv.GaussianBlur(dst, blurred, new cv.Size(3, 3), 1.0, 1.0);
+  cv.addWeighted(dst, 1.3, blurred, -0.3, 0, dst);
+  blurred.delete();
 
   // 結果の書き出し
   const resultCanvas = document.createElement('canvas');
@@ -236,9 +243,9 @@ function dbPostProcess(
 
     const rect = cv.minAreaRect(contour);
     
-    // 検出領域の確信度平均（スコア）を算出し、ノイズを除去する (基準値 0.6)
+    // 検出領域の確信度平均（スコア）を算出し、ノイズを除去する (ピンボケ対策のため0.5に緩和)
     const score = calculateBoxScore(predMat, contour);
-    if (score < 0.6) {
+    if (score < 0.5) {
       contour.delete();
       continue;
     }
