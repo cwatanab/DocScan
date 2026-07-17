@@ -95,18 +95,10 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     let targetFilterMode = filterMode;
 
     if (autoDetectFilter) {
-      // 一時的な台形補正を行い、最適なフィルターモードを自動判定する
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = imageSize.width;
-      tempCanvas.height = imageSize.height;
-      const ctx = tempCanvas.getContext('2d');
-      
-      if (ctx) {
-        ctx.drawImage(imageRef.current, 0, 0);
-        const warpedCanvas = warpImage(tempCanvas, corners);
-        targetFilterMode = detectOptimalFilter(warpedCanvas);
-        setFilterMode(targetFilterMode); // UIの選択状態を更新
-      }
+      // 一時的な台形補正を行い、最適なフィルターモードを自動判定する (warpImageは直接ImageElementを受け取れるため、一時Canvasへのコピーを回避しメモリ消費を抑えます)
+      const warpedCanvas = warpImage(imageRef.current, corners);
+      targetFilterMode = detectOptimalFilter(warpedCanvas);
+      setFilterMode(targetFilterMode); // UIの選択状態を更新
     }
     
     const url = processWarpAndFilter(imageRef.current, corners, targetFilterMode);
