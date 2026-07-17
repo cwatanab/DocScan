@@ -19,11 +19,12 @@ export async function initDocSegEngine(): Promise<ort.InferenceSession | null> {
   }
 
   isInitializing = true;
-  ort.env.wasm.wasmPaths = window.location.origin + '/';
+  ort.env.wasm.wasmPaths = import.meta.env.BASE_URL;
 
   try {
     console.log("[AI Seg] Loading document corner detection model (1.9MB)...");
-    docSegSession = await ort.InferenceSession.create('/models/doc_seg.ort', {
+    const modelPath = `${import.meta.env.BASE_URL}models/doc_seg.ort`;
+    docSegSession = await ort.InferenceSession.create(modelPath, {
       executionProviders: ['wasm'],
     });
     console.log("[AI Seg] Model loaded successfully.");
