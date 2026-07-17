@@ -24,7 +24,7 @@ export async function initDocSegEngine(): Promise<ort.InferenceSession> {
 
   try {
     console.log("[AI Seg] Loading document segmentation model...");
-    docSegSession = await ort.InferenceSession.create('/models/doc_seg.onnx', {
+    docSegSession = await ort.InferenceSession.create('https://huggingface.co/Jwalit/kyc-document-corner-detector-v2/resolve/main/model.onnx', {
       executionProviders: ['wasm'],
     });
     console.log("[AI Seg] Model loaded successfully.");

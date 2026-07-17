@@ -103,12 +103,12 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /^https:\/\/huggingface\.co\/PaddlePaddle\/PP-OCRv6_.*\/resolve\/main\/inference\.onnx$/,
+            urlPattern: /^https:\/\/huggingface\.co\/.*\/resolve\/main\/.*\.onnx$/,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'ocr-models-cache',
+              cacheName: 'huggingface-models-cache',
               expiration: {
-                maxEntries: 5,
+                maxEntries: 10,
                 maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
               },
               cacheableResponse: {
