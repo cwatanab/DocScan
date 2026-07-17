@@ -31,6 +31,11 @@ const removeWasmPlugin = () => {
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      'onnxruntime-web': join(process.cwd(), 'node_modules', 'onnxruntime-web', 'dist', 'ort.wasm.min.mjs')
+    }
+  },
   define: {
     __ORT_VERSION__: JSON.stringify(ORT_VERSION)
   },
