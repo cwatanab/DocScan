@@ -72,7 +72,7 @@ export const OpenCvInitializer: React.FC<OpenCvInitializerProps> = ({ cvError })
           <Loader2 className="spinner spinner-large" style={{ color: '#6366f1', marginBottom: '16px' }} />
           <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>初期化中</h3>
           <p>
-            AI モデルを初期化しています。これには数秒かかる場合があります。
+            画像処理エンジンを初期化しています。これには数秒かかる場合があります。
           </p>
           {isLocalExecution() && (
             <button

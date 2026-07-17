@@ -19,8 +19,9 @@ export function loadOpenCV(timeoutMs: number = 90000): Promise<void> {
   }
 
   opencvLoadPromise = new Promise<void>((resolve, reject) => {
-    // 既に準備完了している場合
-    if (window.cvState === 'ready' || window.cv) {
+    // 既に準備完了している場合 (Wasm初期化完了を保証するため cv.Mat の存在までチェック)
+    if (window.cvState === 'ready' || (window.cv && typeof window.cv.Mat === 'function')) {
+      window.cvState = 'ready';
       resolve();
       return;
     }

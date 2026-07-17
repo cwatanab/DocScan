@@ -55,7 +55,7 @@ export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
         }
       } catch (err: any) {
         console.error('Camera access error:', err);
-        setErrorMsg('カメラの起動に失敗しました。Safariの設定でカメラ許可を確認してください。');
+        setErrorMsg('カメラの起動に失敗しました。ブラウザの設定でカメラ許可を確認してください。');
       }
     };
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, RefreshCw } from 'lucide-react';
+import { Image as ImageIcon, RefreshCw } from 'lucide-react';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentWithFallback, getDefaultCorners } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
@@ -232,7 +232,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
             {/* アプリロゴ・タイトル・ガイダンス統合オーバーレイ */}
             <div className="scanner-header-overlay">
               <div className="scanner-logo-wrapper">
-                <Sparkles className="scanner-logo-icon" />
+                <img src="/favicon.ico" alt="" className="scanner-logo-icon" />
               </div>
               <div className="scanner-header-content">
                 <h1 className="scanner-title">DocScan <span style={{ fontSize: '0.55em', opacity: 0.6, marginLeft: '6px', fontWeight: 'normal', verticalAlign: 'middle', WebkitTextFillColor: '#ffffff', WebkitBackgroundClip: 'unset', background: 'none' }}>v0.1</span></h1>

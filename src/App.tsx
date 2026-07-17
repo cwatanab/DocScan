@@ -3,23 +3,8 @@ import { DocumentEditor } from './components/DocumentEditor';
 import { ExportPreview } from './components/ExportPreview';
 import { useScanSession } from './utils/useScanSession';
 import { Loader2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { loadOpenCV } from './utils/opencvHelper';
-import { OpenCvInitializer } from './components/OpenCvInitializer';
 
 export default function App() {
-  const [cvReady, setCvReady] = useState(false);
-  const [cvError, setCvError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadOpenCV(90000)
-      .then(() => setCvReady(true))
-      .catch((err) => {
-        console.error("[App] OpenCV load failed:", err);
-        setCvError(err.message || 'OpenCV.js の読み込みに失敗しました。');
-      });
-  }, []);
-
   const {
     step,
     currentRawImage,
@@ -38,10 +23,6 @@ export default function App() {
     backToScanner,
     backToEdit
   } = useScanSession();
-
-  if (!cvReady) {
-    return <OpenCvInitializer cvError={cvError} />;
-  }
 
   return (
     <div className="app-layout">

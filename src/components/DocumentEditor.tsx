@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
-import { warpImage, rotateImage90, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
+import { loadOpenCV, warpImage, rotateImage90, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 import { useCropHandles } from './useCropHandles';
+import { OpenCvInitializer } from './OpenCvInitializer';
 
 interface DocumentEditorProps {
   imageSrc: string;
@@ -24,6 +25,8 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const previewImageRef = useRef<HTMLImageElement>(null);
+  const [cvReady, setCvReady] = useState(() => window.cvState === 'ready' || (window.cv && typeof window.cv.Mat === 'function'));
+  const [cvError, setCvError] = useState<string | null>(null);
   
   const [filterMode, setFilterMode] = useState<'color' | 'document'>(initialFilterMode || 'document');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
@@ -48,6 +51,28 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       console.warn("Failed to persist ocr state:", e);
     }
   };
+
+  useEffect(() => {
+    if (cvReady) return;
+
+    let cancelled = false;
+
+    loadOpenCV(90000)
+      .then(() => {
+        if (!cancelled) {
+          setCvReady(true);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[DocumentEditor] OpenCV load failed:', err);
+        setCvError(err.message || 'OpenCV.js の読み込みに失敗しました。');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cvReady]);
 
   // カスタムフックを呼び出して、ピンのドラッグと拡大ルーペのロジックを一括委譲
   const {
@@ -90,6 +115,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   // 台形補正のプレビュー実行
   const handleWarpPreview = useCallback((autoDetectFilter: boolean = false) => {
+    if (!cvReady) return;
     if (corners.length !== 4 || !imageRef.current) return;
 
     let targetFilterMode = filterMode;
@@ -106,14 +132,15 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setWarpedImage(url);
       setIsWarped(true);
     }
-  }, [corners, imageSize.width, imageSize.height, filterMode]);
+  }, [corners, imageSize.width, imageSize.height, filterMode, cvReady]);
 
   // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
   useEffect(() => {
+    if (!cvReady) return;
     if (initialIsWarped && imageSize.width > 0 && corners.length === 4 && !warpedImage) {
       handleWarpPreview(false); // 初回自動補正を実行
     }
-  }, [initialIsWarped, imageSize, corners, warpedImage, handleWarpPreview]);
+  }, [initialIsWarped, imageSize, corners, warpedImage, handleWarpPreview, cvReady]);
 
   // 画像読み込み完了時のサイズ取得
   const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -151,13 +178,15 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   // フィルタ切り替え時のプレビュー再実行
   useEffect(() => {
+    if (!cvReady) return;
     if (isWarped) {
       handleWarpPreview(false); // 手動での切り替え時は自動判定をスキップ
     }
-  }, [filterMode, isWarped, handleWarpPreview]);
+  }, [filterMode, isWarped, handleWarpPreview, cvReady]);
 
   // 確定して保存
   const handleConfirm = useCallback(() => {
+    if (!cvReady) return;
     let rect: DOMRect | null = null;
     if (previewImageRef.current) {
       rect = previewImageRef.current.getBoundingClientRect();
@@ -171,7 +200,11 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
         onSave(url, filterMode, enableOcr, corners, rect);
       }
     }
-  }, [warpedImage, onSave, filterMode, enableOcr, corners]);
+  }, [warpedImage, onSave, filterMode, enableOcr, corners, cvReady]);
+
+  if (!cvReady) {
+    return <OpenCvInitializer cvError={cvError} />;
+  }
 
   return (
     <div className="editor-container"

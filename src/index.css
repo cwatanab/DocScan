@@ -478,8 +478,8 @@ html, body {
 }
 
 .scanner-logo-wrapper {
-  width: 40px; /* サイズアップ (34px -> 40px) */
-  height: 40px;
+  width: 48px; /* アイコンを少し大きく見せるため拡大 */
+  height: 48px;
   background: linear-gradient(135deg, #6366f1, #10b981);
   border-radius: 50%;
   display: flex;
@@ -490,9 +490,9 @@ html, body {
 }
 
 .scanner-logo-icon {
-  width: 20px; /* サイズアップ (16px -> 20px) */
-  height: 20px;
-  color: #ffffff;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 
 .scanner-header-content {
