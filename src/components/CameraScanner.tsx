@@ -45,9 +45,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     if (aiEnabled && !aiModelLoaded && !aiLoading) {
       setAiLoading(true);
       initDocSegEngine()
-        .then(() => {
-          setAiModelLoaded(true);
-          console.log("[CameraScanner] AI segmentation model preloaded.");
+        .then((session) => {
+          if (session) {
+            setAiModelLoaded(true);
+            console.log("[CameraScanner] AI segmentation model preloaded.");
+          } else {
+            setAiModelLoaded(false);
+            console.warn("[CameraScanner] AI model load failed. Fallback to OpenCV enabled.");
+          }
         })
         .catch(err => {
           console.error("[CameraScanner] Failed to preload AI model:", err);
