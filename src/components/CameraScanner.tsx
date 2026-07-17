@@ -12,12 +12,41 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
-const getDefaultCorners = (w: number, h: number): Point[] => [
-  { x: w * 0.1, y: h * 0.1 },
-  { x: w * 0.9, y: h * 0.1 },
-  { x: w * 0.9, y: h * 0.9 },
-  { x: w * 0.1, y: h * 0.9 }
-];
+const getDefaultCorners = (w: number, h: number): Point[] => {
+  const a4Ratio = 1.4142;
+  let rectW = 0;
+  let rectH = 0;
+
+  if (h > w) {
+    // 縦画面の場合: 縦長のA4 (高さ = 幅 * 1.414)
+    rectW = w * 0.75;
+    rectH = rectW * a4Ratio;
+    if (rectH > h * 0.8) {
+      rectH = h * 0.8;
+      rectW = rectH / a4Ratio;
+    }
+  } else {
+    // 横画面の場合: 横長のA4 (幅 = 高さ * 1.414)
+    rectH = h * 0.75;
+    rectW = rectH * a4Ratio;
+    if (rectW > w * 0.8) {
+      rectW = w * 0.8;
+      rectH = rectW / a4Ratio;
+    }
+  }
+
+  const startX = (w - rectW) / 2;
+  const startY = (h - rectH) / 2;
+  const endX = startX + rectW;
+  const endY = startY + rectH;
+
+  return [
+    { x: startX, y: startY },
+    { x: endX, y: startY },
+    { x: endX, y: endY },
+    { x: startX, y: endY }
+  ];
+};
 
 interface FrameCache {
   canvas: HTMLCanvasElement;
