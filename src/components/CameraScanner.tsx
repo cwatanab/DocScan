@@ -434,7 +434,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 <Sparkles className="scanner-logo-icon" />
               </div>
               <div className="scanner-header-content">
-                <h1 className="scanner-title">DocScan</h1>
+                <h1 className="scanner-title">DocScan <span style={{ fontSize: '0.55em', opacity: 0.6, marginLeft: '6px', fontWeight: 'normal', verticalAlign: 'middle' }}>v0.1</span></h1>
                 <p className="scanner-guidance-text">書類全体が写るようにしてください</p>
               </div>
             </div>
