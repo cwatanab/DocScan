@@ -94,10 +94,28 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const feeds = { [session.inputNames[0]]: inputTensor };
     const results = await session.run(feeds);
     
-    // モデルの出力レイヤーを取得
-    // outputs: 0 -> coords [1, 8], 1 -> score_logit [1, 1]
-    const coordsTensor = results[session.outputNames[0]];
-    const scoreTensor = results[session.outputNames[1]];
+    // モデルの出力レイヤーを取得 (順序不整合対策のため名前で動的に探索)
+    let coordsTensor: ort.Tensor | null = null;
+    let scoreTensor: ort.Tensor | null = null;
+
+    for (const name of session.outputNames) {
+      if (name.includes('coord')) {
+        coordsTensor = results[name];
+      } else if (name.includes('score') || name.includes('logit')) {
+        scoreTensor = results[name];
+      }
+    }
+
+    // 見つからなかった場合の順序指定フォールバック
+    if (!coordsTensor || !scoreTensor) {
+      coordsTensor = results[session.outputNames[0]];
+      scoreTensor = results[session.outputNames[1]];
+    }
+
+    if (!coordsTensor || !scoreTensor) {
+      console.error("[AI Seg] Output tensors not found in model results.");
+      return null;
+    }
 
     const coordsData = coordsTensor.data as Float32Array;
     const scoreLogit = scoreTensor.data[0] as number;
@@ -106,10 +124,14 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const sigmoid = (x: number) => 1.0 / (1.0 + Math.exp(-x));
     const confidence = sigmoid(scoreLogit);
 
+    console.log(`[AI Seg] Inference Results - score_logit: ${scoreLogit.toFixed(4)}, confidence: ${confidence.toFixed(4)}, coords_len: ${coordsData.length}`);
+    if (coordsData.length >= 8) {
+      console.log(`[AI Seg] Raw coordinates:`, Array.from(coordsData).map(v => v.toFixed(3)));
+    }
+
     // ドキュメントが見つからない（写っていない）と判断された場合は null
     // 境界閾値を 0.35 に設定し、緩めながらも誤検出を防ぐ
     if (confidence < 0.35) {
-      console.log(`[AI Seg] Document not detected (confidence: ${confidence.toFixed(3)})`);
       return null;
     }
 
