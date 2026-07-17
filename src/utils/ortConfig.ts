@@ -15,5 +15,5 @@ export function setupOrtEnvironment(): void {
   ort.env.wasm.numThreads = 1;
 
   ortInitialized = true;
-  console.log("[ortConfig] ONNX Runtime environment initialized (numThreads: 1, wasmPaths: local)");
+
 }

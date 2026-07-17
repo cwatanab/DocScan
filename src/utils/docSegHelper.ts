@@ -23,12 +23,12 @@ export async function initDocSegEngine(): Promise<ort.InferenceSession | null> {
   setupOrtEnvironment();
 
   try {
-    console.log("[AI Seg] Loading document corner detection model (1.9MB)...");
+
     const modelPath = `${import.meta.env.BASE_URL}models/doc_seg.ort`;
     docSegSession = await ort.InferenceSession.create(modelPath, {
       executionProviders: ['wasm'],
     });
-    console.log("[AI Seg] Model loaded successfully.");
+
     return docSegSession;
   } catch (err) {
     console.warn('[AI Seg] Document corner detection model not found or failed to load. Falling back to OpenCV.');

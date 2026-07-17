@@ -228,7 +228,6 @@ export const shareSinglePage = async (
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      console.log("Sharing was canceled by user.");
       return;
     }
     console.error("Failed to share page:", err);
@@ -265,7 +264,6 @@ export const shareAllPages = async (
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      console.log("Batch sharing was canceled by user.");
       return;
     }
     console.error("Failed to share pages:", err);

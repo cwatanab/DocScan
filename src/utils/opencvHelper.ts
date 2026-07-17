@@ -29,7 +29,6 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
     if (!(window as any).Module) {
       (window as any).Module = {
         onRuntimeInitialized: () => {
-          console.log("[OpenCV] onRuntimeInitialized callback triggered!");
           (window as any).cvState = 'ready';
           window.dispatchEvent(new Event('opencv-ready'));
           resolve();
@@ -41,7 +40,6 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
         if (oldInit) {
           try { oldInit(); } catch (e) { console.error(e); }
         }
-        console.log("[OpenCV] Hooked onRuntimeInitialized callback triggered!");
         (window as any).cvState = 'ready';
         window.dispatchEvent(new Event('opencv-ready'));
         resolve();
@@ -64,7 +62,6 @@ export function loadOpenCV(timeoutMs: number = 30000): Promise<void> {
     // HTMLに存在するスクリプトタグのエラーイベントをフック
     const script = document.getElementById('opencv-script') as HTMLScriptElement | null;
     if (script) {
-      console.log("[OpenCV] Monitoring existing static script tag...");
       const oldOnError = script.onerror;
       script.onerror = (e) => {
         if (oldOnError) {
