@@ -101,7 +101,7 @@ export default defineConfig({
     wasmGlueMiddleware(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.ico'],
       manifest: {
         name: 'DocScan',
         short_name: 'DocScan',
@@ -112,9 +112,9 @@ export default defineConfig({
         orientation: 'portrait',
         icons: [
           {
-            src: 'favicon.svg',
-            sizes: '192x192 512x512',
-            type: 'image/svg+xml',
+            src: 'favicon.ico',
+            sizes: '32x32',
+            type: 'image/x-icon',
             purpose: 'any maskable'
           }
         ]
