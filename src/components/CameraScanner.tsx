@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon, Sparkles, RefreshCw, X } from 'lucide-react';
+import { Image as ImageIcon, Sparkles } from 'lucide-react';
 import { loadOpenCV } from '../utils/opencvHelper';
 import type { Point } from '../utils/opencvHelper';
 import { detectDocumentAI } from '../utils/docSegHelper';
@@ -260,28 +260,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     reader.readAsDataURL(file);
   };
 
-  // キャッシュクリア＆ハードリロード
-  const handleClearCacheAndReload = async () => {
-    if (window.confirm("キャッシュをクリアしてアプリを再起動しますか？\n(モデルの読み込みエラーなどが解消されます)")) {
-      try {
-        // Cache Storage の全削除
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(key => caches.delete(key)));
-        }
-        // Service Worker の登録解除
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(registrations.map(reg => reg.unregister()));
-        }
-        console.log("[CameraScanner] Cache cleared, reloading...");
-        window.location.reload();
-      } catch (err) {
-        console.error("Failed to clear cache:", err);
-        window.location.reload();
-      }
-    }
-  };
 
   if (!cvReady) {
     return <OpenCvInitializer cvError={cvError} />;
@@ -341,49 +319,24 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
               </div>
             </div>
 
-            {/* 閉じるボタン (右上フローティング) */}
-            {onCancel && (
-              <button
-                onClick={onCancel}
-                style={{
-                  position: 'absolute',
-                  right: '16px',
-                  top: 'calc(16px + env(safe-area-inset-top, 0px))',
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(30, 41, 59, 0.75)',
-                  backdropFilter: 'blur(8px)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  color: '#e2e8f0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  zIndex: 30,
-                  boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
-                  padding: 0,
-                }}
-                title="閉じる"
-                type="button"
-              >
-                <X style={{ width: '20px', height: '20px' }} />
-              </button>
-            )}
+            {/* 閉じるボタンはコントロールバーに戻したためフローティングは削除 */}
           </>
         )}
       </div>
 
       {/* コントロールバー */}
       <div className="scanner-controls">
-        <button
-          onClick={handleClearCacheAndReload}
-          className="scanner-btn-secondary"
-          title="キャッシュをクリアして再起動"
-          type="button"
-        >
-          <RefreshCw style={{ width: '20px', height: '20px' }} />
-        </button>
+        {onCancel ? (
+          <button
+            onClick={onCancel}
+            className="scanner-close-btn"
+          >
+            閉じる
+          </button>
+        ) : (
+          /* レイアウトの対称性を維持し、シャッターを完全に中央に固定するためのダミースペース */
+          <div style={{ width: '60px', visibility: 'hidden' }} />
+        )}
 
         <button
           onClick={handleShutter}
