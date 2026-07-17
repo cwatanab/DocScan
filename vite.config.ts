@@ -81,7 +81,8 @@ export default defineConfig({
         '**/*.wasm',
         '**/*.mjs',
         '**/public/models/**',
-        '**/public/ort-wasm-simd-threaded.*'
+        '**/public/ort-wasm-simd-threaded.*',
+        '**/.agent/**'
       ]
     }
   },
