@@ -405,28 +405,34 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
   }
 
   if (mode === 'color') {
-    // カラーモード: 紙の陰影ムラを除去（除算）しつつ、インクの鮮やかさを残してガンマ補正をかける
+    // カラーモード: YCrCb 空間に変換し、輝度チャンネル Y のみに対して背景除算とコントラスト補正を行うことで色ズレを完全に防ぎます。
+    const ycrcb = new cv.Mat();
+    cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
+
     const channels = new cv.MatVector();
-    cv.split(src, channels);
+    cv.split(ycrcb, channels);
+    
+    const yChan = channels.get(0);  // Y (輝度)
+    const crChan = channels.get(1); // Cr (色度)
+    const cbChan = channels.get(2); // Cb (色度)
     
     // ガンマ補正用LUTの作成
     const lut = new cv.Mat(1, 256, cv.CV_8UC1);
     const data = new Uint8Array(256);
     
-    // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する
-    let gamma = 1.25;
-    let minVal = 20;
-    let maxVal = 235;
+    // カラーモード: 背景除算(Division)によってすでに紙の影は白く飛んでいるため、
+    // 中間色の崩壊(過剰なギラつき)を防ぐため、コントラスト補正は極めて穏やかに適用します。
+    let gamma = 1.0;
+    let minVal = 0;
+    let maxVal = 255;
 
-    if (meanVal < 130) {
-      // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
-      gamma = Math.max(1.0, 1.25 - ((130 - meanVal) / 130) * 0.25);
-      minVal = Math.max(10, 20 - Math.round((130 - meanVal) / 10));
-      maxVal = Math.max(190, 235 - Math.round((130 - meanVal) / 3));
-    } else {
-      // 明るい画像 ➔ コントラストを高め、白飛びを防ぐ
-      gamma = Math.min(1.5, 1.25 + ((meanVal - 130) / 125) * 0.25);
-      minVal = Math.min(30, 20 + Math.round((meanVal - 130) / 12));
+    if (meanVal < 110) {
+      // 露出が極端に不足している暗い画像のみ、ガンマ補正で明るく調整
+      gamma = 0.85; 
+    } else if (meanVal > 200) {
+      // 非常に明るい画像は、わずかに引き締める
+      gamma = 1.05;
     }
     
     for (let i = 0; i < 256; i++) {
@@ -443,40 +449,39 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     }
     lut.data.set(data);
 
-    // RGBの各チャンネルごとに背景除算＋ガンマ補正を適用
+    // Yチャンネルに対して背景除算（影消し）とLUT補正を適用
     const kernelSize = 33;
     const M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
 
-    for (let c = 0; c < 3; c++) {
-      const ch = channels.get(c);
-      
-      // 背景推定 (膨張 + メディアンフィルタ)
-      const dilated = new cv.Mat();
-      const bg = new cv.Mat();
-      cv.dilate(ch, dilated, M);
-      cv.medianBlur(dilated, bg, kernelSize);
-      
-      // 影ムラを除去（除算）し背景を白く飛ばす
-      cv.divide(ch, bg, ch, 255.0);
-      
-      // ガンマ・レベル補正を適用
-      cv.LUT(ch, lut, ch);
-      
-      dilated.delete();
-      bg.delete();
-    }
-
-    cv.merge(channels, dst);
-
+    const dilated = new cv.Mat();
+    const bg = new cv.Mat();
+    cv.dilate(yChan, dilated, M);
+    cv.medianBlur(dilated, bg, kernelSize);
+    
+    // 影ムラを除去（除算）し背景を白く飛ばす
+    cv.divide(yChan, bg, yChan, 255.0);
+    
+    // ガンマ・レベル補正を適用
+    cv.LUT(yChan, lut, yChan);
+    
+    dilated.delete();
+    bg.delete();
     M.delete();
     lut.delete();
-    
-    // 各チャンネルのメモリ解放
-    for (let c = 0; c < channels.size(); c++) {
-      const ch = channels.get(c);
-      ch.delete();
-    }
+
+    // 再合成して RGB に変換してから RGBA に戻す (COLOR_YCrCb2RGBA は OpenCV.js で未定義のため)
+    cv.merge(channels, ycrcb);
+    const rgb = new cv.Mat();
+    cv.cvtColor(ycrcb, rgb, cv.COLOR_YCrCb2RGB);
+    cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
+    rgb.delete();
+
+    // リソースの解放
+    yChan.delete();
+    crChan.delete();
+    cbChan.delete();
     channels.delete();
+    ycrcb.delete();
   } else if (mode === 'mono') {
     // モノクロ化（白黒2値化）
     cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);

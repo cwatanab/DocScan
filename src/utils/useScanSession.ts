@@ -15,6 +15,8 @@ export function useScanSession() {
   const [currentRawImage, setCurrentRawImage] = useState<string | null>(null);
   const [currentCorners, setCurrentCorners] = useState<Point[]>([]);
   const [scannedPages, setScannedPages] = useState<string[]>([]);
+  const [scannedPageFilterModes, setScannedPageFilterModes] = useState<('color' | 'document')[]>([]);
+  const [currentFilterMode, setCurrentFilterMode] = useState<'color' | 'document'>('document');
   const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({});
   const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf');
   const [initialIsWarped, setInitialIsWarped] = useState(false);
@@ -25,6 +27,7 @@ export function useScanSession() {
   const startNewScan = () => {
     setScannedPages([]);
     setOcrResults({});
+    setScannedPageFilterModes([]);
     setCurrentRawImage(null);
     setStep('scan');
   };
@@ -34,17 +37,22 @@ export function useScanSession() {
     setCurrentRawImage(imageSrc);
     setCurrentCorners(corners);
     setInitialIsWarped(false); // トリミング調整から開始する
+    setCurrentFilterMode('document'); // 新規撮影時はデフォルトに戻す
     setStep('edit');
   };
 
   // 編集画面での決定時の処理
   const savePage = async (
     warpedImageSrc: string,
-    _filterMode: 'color' | 'document',
+    filterMode: 'color' | 'document',
     enableOcr: boolean,
+    corners: Point[],
     rect?: DOMRect | null
   ) => {
+    setCurrentCorners(corners); // ユーザーが調整した座標を履歴保存用に上書き
     setExportMode(enableOcr ? 'pdf' : 'jpeg');
+    setCurrentFilterMode(filterMode);
+    setScannedPageFilterModes(prev => [...prev, filterMode]);
 
     if (rect) {
       setFlyingImage({
@@ -104,6 +112,14 @@ export function useScanSession() {
       return next;
     });
     setScannedPages(prev => prev.slice(0, -1));
+
+    // 最後のページのフィルターモードを復元して配列から削る
+    setScannedPageFilterModes(prev => {
+      const lastMode = prev[prev.length - 1] || 'document';
+      setCurrentFilterMode(lastMode);
+      return prev.slice(0, -1);
+    });
+
     setInitialIsWarped(true); // フィルター適用画面に戻す
     setStep('edit');
   };
@@ -113,11 +129,13 @@ export function useScanSession() {
     currentRawImage,
     currentCorners,
     scannedPages,
+    scannedPageFilterModes,
     ocrResults,
     exportMode,
     initialIsWarped,
     isOcrLoading,
     flyingImage,
+    currentFilterMode,
     startNewScan,
     capture,
     savePage,

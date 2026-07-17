@@ -15,6 +15,7 @@ export default function App() {
     initialIsWarped,
     isOcrLoading,
     flyingImage,
+    currentFilterMode,
     capture,
     savePage,
     cancelEdit,
@@ -48,6 +49,7 @@ export default function App() {
           onSave={savePage}
           onCancel={cancelEdit}
           initialIsWarped={initialIsWarped}
+          initialFilterMode={currentFilterMode}
         />
       )}
 

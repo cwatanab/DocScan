@@ -7,7 +7,14 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig({
   server: {
     host: true,
-    port: 5173
+    port: 5173,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    },
+    watch: {
+      ignored: ['**/SCAN_*', '**/*.pdf', '**/*.png', '**/*.jpeg', '**/*.jpg']
+    }
   },
   plugins: [
     react(),
@@ -35,7 +42,7 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024, // OpenCV.js (10MB) キャッシュのため
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
-        globIgnores: ['**/opencv.js'],
+        globIgnores: ['**/opencv.js', '**/ort-wasm*.wasm', '**/ort-wasm*.mjs'],
         runtimeCaching: [
           {
             urlPattern: /opencv\.js(\?.*)?$/,
@@ -44,6 +51,20 @@ export default defineConfig({
               cacheName: 'opencv-cache',
               expiration: {
                 maxEntries: 1,
+                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
+          {
+            urlPattern: /ort-wasm-.*\.(wasm|mjs)(\?.*)?$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ort-wasm-cache',
+              expiration: {
+                maxEntries: 20,
                 maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
               },
               cacheableResponse: {

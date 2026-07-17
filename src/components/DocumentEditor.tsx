@@ -7,9 +7,10 @@ import { useCropHandles } from './useCropHandles';
 interface DocumentEditorProps {
   imageSrc: string;
   initialCorners: Point[];
-  onSave: (warpedImageSrc: string, filterMode: 'color' | 'document', enableOcr: boolean, rect?: DOMRect | null) => void;
+  onSave: (warpedImageSrc: string, filterMode: 'color' | 'document', enableOcr: boolean, corners: Point[], rect?: DOMRect | null) => void;
   onCancel: () => void;
   initialIsWarped?: boolean;
+  initialFilterMode?: 'color' | 'document';
 }
 
 export const DocumentEditor: React.FC<DocumentEditorProps> = ({
@@ -17,13 +18,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   initialCorners,
   onSave,
   onCancel,
-  initialIsWarped = false
+  initialIsWarped = false,
+  initialFilterMode
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const previewImageRef = useRef<HTMLImageElement>(null);
   
-  const [filterMode, setFilterMode] = useState<'color' | 'document'>('document');
+  const [filterMode, setFilterMode] = useState<'color' | 'document'>(initialFilterMode || 'document');
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
   const [isWarped, setIsWarped] = useState(initialIsWarped);
@@ -113,6 +115,16 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     return () => window.removeEventListener('resize', updateDisplaySize);
   }, []);
 
+  // 非表示(display: none)から表示に切り替わった瞬間に表示サイズを再計測・更新する
+  useEffect(() => {
+    if (!isWarped) {
+      const timer = setTimeout(() => {
+        updateDisplaySize();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isWarped]);
+
   const handleTouchMove = (e: React.TouchEvent) => {
     if (draggedIndex === null) return;
     const touch = e.touches[0];
@@ -167,11 +179,11 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
 
     if (warpedImage) {
-      onSave(warpedImage, filterMode, enableOcr, rect);
+      onSave(warpedImage, filterMode, enableOcr, corners, rect);
     } else if (imageRef.current) {
       const url = processWarpAndFilter(imageRef.current, corners, filterMode);
       if (url) {
-        onSave(url, filterMode, enableOcr, rect);
+        onSave(url, filterMode, enableOcr, corners, rect);
       }
     }
   };
