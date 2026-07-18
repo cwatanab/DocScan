@@ -49,6 +49,20 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     setIsSleeping(false);
   };
 
+  // スマートフォンの画面ON/OFF（画面ロック・アプリ切替など）を検知して省電力スリープへ移行
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        setIsSleeping(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   // リアルタイム輪郭検出ループ
   useEffect(() => {
     if (!cameraActive || !videoRef.current || !canvasRef.current) return;
