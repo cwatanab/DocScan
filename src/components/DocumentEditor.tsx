@@ -1,17 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
-import { loadOpenCV, warpImage, rotateImage90, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
-import type { Point } from '../utils/opencvHelper';
+import { loadOpenCV, warpImage, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
+import type { Point, FilterMode } from '../utils/opencvHelper';
 import { useCropHandles } from './useCropHandles';
 import { OpenCvInitializer } from './OpenCvInitializer';
 
 interface DocumentEditorProps {
   imageSrc: string;
   initialCorners: Point[];
-  onSave: (warpedImageSrc: string, filterMode: 'color' | 'document', enableOcr: boolean, corners: Point[], rect?: DOMRect | null) => void;
+  onSave: (warpedImageSrc: string, filterMode: FilterMode, enableOcr: boolean, corners: Point[], rect?: DOMRect | null) => void;
   onCancel: () => void;
   initialIsWarped?: boolean;
-  initialFilterMode?: 'color' | 'document';
+  initialFilterMode?: FilterMode;
 }
 
 export const DocumentEditor: React.FC<DocumentEditorProps> = ({
@@ -28,7 +28,27 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [cvReady, setCvReady] = useState(() => window.cvState === 'ready' || (window.cv && typeof window.cv.Mat === 'function'));
   const [cvError, setCvError] = useState<string | null>(null);
   
-  const [filterMode, setFilterMode] = useState<'color' | 'document'>(initialFilterMode || 'document');
+  const [filterMode, setFilterMode] = useState<FilterMode>(initialFilterMode || 'document_enhanced');
+
+  // カラーモードと補正モードの派生状態
+  const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original') ? 'color' : 'document';
+  const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced') ? 'enhanced' : 'original';
+
+  const handleSetColorMode = (newColorMode: 'color' | 'document') => {
+    const newMode: FilterMode = newColorMode === 'color'
+      ? (enhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
+      : (enhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
+    setFilterMode(newMode);
+  };
+
+  const handleSetEnhancementMode = (newEnhancementMode: 'enhanced' | 'original') => {
+    const newMode: FilterMode = colorMode === 'color'
+      ? (newEnhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
+      : (newEnhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
+    setFilterMode(newMode);
+  };
+
+  const [rotation, setRotation] = useState<number>(0); // 0, 90, 180, 270 度
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
   const [isWarped, setIsWarped] = useState(initialIsWarped);
@@ -103,18 +123,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   // 90度回転処理 (補正後の画像を回転。左右指定可能)
   const handleRotate = useCallback((clockwise: boolean = true) => {
-    if (!warpedImage) return;
-    const img = new Image();
-    img.onload = () => {
-      const rotatedCanvas = rotateImage90(img, clockwise);
-      const url = rotatedCanvas.toDataURL('image/jpeg', 0.95);
-      setWarpedImage(url);
-    };
-    img.src = warpedImage;
-  }, [warpedImage]);
+    setRotation(prev => {
+      const next = clockwise ? (prev + 90) % 360 : (prev - 90 + 360) % 360;
+      return next;
+    });
+  }, []);
 
   // 台形補正のプレビュー実行
-  const handleWarpPreview = useCallback((autoDetectFilter: boolean = false) => {
+  const handleWarpPreview = useCallback((autoDetectFilter: boolean = false, targetRotation: number = rotation) => {
     if (!cvReady) return;
     if (corners.length !== 4 || !imageRef.current) return;
 
@@ -127,12 +143,12 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setFilterMode(targetFilterMode); // UIの選択状態を更新
     }
     
-    const url = processWarpAndFilter(imageRef.current, corners, targetFilterMode);
+    const url = processWarpAndFilter(imageRef.current, corners, targetFilterMode, targetRotation);
     if (url) {
       setWarpedImage(url);
       setIsWarped(true);
     }
-  }, [corners, filterMode, cvReady]);
+  }, [corners, filterMode, rotation, cvReady]);
 
   // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
   useEffect(() => {
@@ -176,13 +192,13 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     handleMove(e.clientX, e.clientY);
   }, [draggedIndex, handleMove]);
 
-  // フィルタ切り替え時のプレビュー再実行
+  // フィルタや回転切り替え時のプレビュー再実行
   useEffect(() => {
     if (!cvReady) return;
     if (isWarped) {
-      handleWarpPreview(false); // 手動での切り替え時は自動判定をスキップ
+      handleWarpPreview(false, rotation);
     }
-  }, [filterMode, isWarped, handleWarpPreview, cvReady]);
+  }, [filterMode, rotation, isWarped, handleWarpPreview, cvReady]);
 
   // 確定して保存
   const handleConfirm = useCallback(() => {
@@ -195,12 +211,12 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     if (warpedImage) {
       onSave(warpedImage, filterMode, enableOcr, corners, rect);
     } else if (imageRef.current) {
-      const url = processWarpAndFilter(imageRef.current, corners, filterMode);
+      const url = processWarpAndFilter(imageRef.current, corners, filterMode, rotation);
       if (url) {
         onSave(url, filterMode, enableOcr, corners, rect);
       }
     }
-  }, [warpedImage, onSave, filterMode, enableOcr, corners, cvReady]);
+  }, [warpedImage, onSave, filterMode, enableOcr, corners, rotation, cvReady]);
 
   if (!cvReady) {
     return <OpenCvInitializer cvError={cvError} />;
@@ -222,13 +238,13 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           {"< 戻る"}
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>
-          {isWarped ? 'フィルタ適用' : 'トリミング調整'}
+          {isWarped ? 'フィルター適用' : 'トリミング調整'}
         </h3>
         <button
           onClick={isWarped ? handleConfirm : () => handleWarpPreview(true)}
           className="btn-text-nav btn-text-accent"
         >
-          {isWarped ? '確定 >' : '次へ >'}
+          {'次へ >'}
         </button>
       </div>
 
@@ -336,27 +352,52 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       {/* 下部コントロールエリア (フィルタ適用モードの時のみフッターパネルを表示) */}
       {isWarped && (
         <div className="editor-footer" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* 行1: フィルター選択 */}
+          {/* 行1: カラーモード選択 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
-              モード
+              ドキュメント
             </span>
             <div className="filter-tabs">
               <button
                 type="button"
-                onClick={() => setFilterMode('document')}
-                className={`filter-tab-btn ${filterMode === 'document' ? 'filter-tab-btn-active' : ''}`}
-                style={{ flex: 1 }}
-              >
-                ドキュメント
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterMode('color')}
-                className={`filter-tab-btn ${filterMode === 'color' ? 'filter-tab-btn-active' : ''}`}
+                onClick={() => handleSetColorMode('color')}
+                className={`filter-tab-btn ${colorMode === 'color' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 カラー
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetColorMode('document')}
+                className={`filter-tab-btn ${colorMode === 'document' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                白黒
+              </button>
+            </div>
+          </div>
+
+          {/* 行2: 補正モード選択 */}
+          <div className="filter-tabs-container">
+            <span className="filter-tabs-label">
+              画像補正
+            </span>
+            <div className="filter-tabs">
+              <button
+                type="button"
+                onClick={() => handleSetEnhancementMode('enhanced')}
+                className={`filter-tab-btn ${enhancementMode === 'enhanced' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                あり
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetEnhancementMode('original')}
+                className={`filter-tab-btn ${enhancementMode === 'original' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                なし
               </button>
             </div>
           </div>

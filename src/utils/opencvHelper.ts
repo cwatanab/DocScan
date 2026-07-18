@@ -191,7 +191,9 @@ export function warpImage(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, 
  * @param dst 出力 cv.Mat (RGBA または GRAY)
  * @param mode フィルターモード
  */
-export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'document'): void {
+export type FilterMode = 'color_enhanced' | 'color_original' | 'document_enhanced' | 'document_original' | 'mono';
+
+export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
   const cv = window.cv;
   if (!cv) return;
 
@@ -204,9 +206,6 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
   let crChan: any = null;
   let cbChan: any = null;
   let lut: any = null;
-  let M: any = null;
-  let dilated: any = null;
-  let bg: any = null;
   let rgb: any = null;
 
   try {
@@ -227,7 +226,7 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       if (stddevMat) { stddevMat.delete(); stddevMat = null; }
     }
 
-    if (mode === 'color') {
+    if (mode === 'color_enhanced') {
       ycrcb = new cv.Mat();
       cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
       cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
@@ -243,16 +242,16 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       const data = new Uint8Array(256);
       
       let gamma = 1.2;
-      let minVal = 15;
-      let maxVal = 240;
+      let minVal = 30;
+      let maxVal = 225;
 
       if (meanVal < 130) {
         gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
-        minVal = Math.max(10, 15 - Math.round((130 - meanVal) / 10));
-        maxVal = Math.max(190, 240 - Math.round((130 - meanVal) / 3));
+        minVal = Math.max(10, 30 - Math.round((130 - meanVal) / 10));
+        maxVal = Math.max(180, 225 - Math.round((130 - meanVal) / 3));
       } else {
         gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
-        minVal = Math.min(25, 15 + Math.round((meanVal - 130) / 12));
+        minVal = Math.min(40, 30 + Math.round((meanVal - 130) / 12));
       }
       
       for (let i = 0; i < 256; i++) {
@@ -269,20 +268,8 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       }
       lut.data.set(data);
 
-      const kernelSize = 33;
-      M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
-
-      dilated = new cv.Mat();
-      bg = new cv.Mat();
-      cv.dilate(yChan, dilated, M);
-      cv.medianBlur(dilated, bg, kernelSize);
-      
-      cv.divide(yChan, bg, yChan, 255.0);
       cv.LUT(yChan, lut, yChan);
       
-      dilated.delete(); dilated = null;
-      bg.delete(); bg = null;
-      M.delete(); M = null;
       lut.delete(); lut = null;
 
       cv.merge(channels, ycrcb);
@@ -296,43 +283,26 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       cbChan.delete(); cbChan = null;
       channels.delete(); channels = null;
       ycrcb.delete(); ycrcb = null;
-    } else if (mode === 'mono') {
+    } else if (mode === 'color_original') {
+      src.copyTo(dst);
+    } else if (mode === 'document_enhanced') {
       cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-      cv.adaptiveThreshold(
-        dst,
-        dst,
-        255,
-        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv.THRESH_BINARY,
-        15,
-        10
-      );
-    } else if (mode === 'document') {
-      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-      
-      dilated = new cv.Mat();
-      bg = new cv.Mat();
-      M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
-      cv.dilate(dst, dilated, M);
-      cv.medianBlur(dilated, bg, 33);
-      
-      cv.divide(dst, bg, dst, 255.0);
       
       lut = new cv.Mat(1, 256, cv.CV_8UC1);
       const data = new Uint8Array(256);
       
-      let gamma = 1.35;
-      let minVal = 20;
-      let maxVal = 230;
+      let gamma = 1.2;
+      let minVal = 30;
+      let maxVal = 225;
 
       if (meanVal < 110) {
         gamma = 1.1;
-        minVal = 10;
-        maxVal = 220;
+        minVal = 20;
+        maxVal = 215;
       } else if (meanVal > 200) {
-        gamma = 1.5;
-        minVal = 30;
-        maxVal = 240;
+        gamma = 1.4;
+        minVal = 40;
+        maxVal = 235;
       }
       
       for (let i = 0; i < 256; i++) {
@@ -350,10 +320,20 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       lut.data.set(data);
       cv.LUT(dst, lut, dst);
 
-      dilated.delete(); dilated = null;
-      bg.delete(); bg = null;
-      M.delete(); M = null;
       lut.delete(); lut = null;
+    } else if (mode === 'document_original') {
+      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+    } else if (mode === 'mono') {
+      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+      cv.adaptiveThreshold(
+        dst,
+        dst,
+        255,
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY,
+        15,
+        10
+      );
     }
   } finally {
     if (grayForStats) { try { grayForStats.delete(); } catch(e){} }
@@ -375,9 +355,6 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
       } catch(e){}
     }
     if (lut) { try { lut.delete(); } catch(e){} }
-    if (M) { try { M.delete(); } catch(e){} }
-    if (dilated) { try { dilated.delete(); } catch(e){} }
-    if (bg) { try { bg.delete(); } catch(e){} }
     if (rgb) { try { rgb.delete(); } catch(e){} }
   }
 }
@@ -388,7 +365,7 @@ export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'd
  * @param mode 'color' | 'mono' | 'document'
  * @returns フィルタ適用後の新しいCanvas
  */
-export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 'document'): HTMLCanvasElement {
+export function applyFilter(canvas: HTMLCanvasElement, mode: FilterMode): HTMLCanvasElement {
   const cv = window.cv;
   if (!cv) return canvas;
 
@@ -504,12 +481,12 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
 /**
  * 画像の色彩や特徴量を解析し、最適なフィルターモードを自動判定する
  * @param canvas 解析対象の補正後画像Canvas
- * @returns 'color' | 'document'
+ * @returns 'original' | 'document'
  */
-export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'document' {
+export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color_enhanced' | 'document_enhanced' {
   const cv = window.cv;
   if (!cv || !cv.Mat) {
-    return 'document'; // フォールバック
+    return 'document_enhanced'; // フォールバック
   }
 
   let src: any = null;
@@ -533,7 +510,7 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
     
     // 彩度の平均値が 15 以上なら「カラー画像」とみなす
     if (meanSat > 15) {
-      return 'color';
+      return 'color_enhanced';
     }
   } catch (e) {
     console.error("Error in detecting optimal filter: ", e);
@@ -550,7 +527,7 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
     if (src) { try { src.delete(); } catch(e){} }
   }
 
-  return 'document';
+  return 'document_enhanced';
 }
 
 /**
@@ -559,7 +536,8 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
 export function processWarpAndFilter(
   imageEl: HTMLImageElement,
   corners: Point[],
-  filterMode: 'color' | 'document'
+  filterMode: FilterMode,
+  rotation: number = 0
 ): string | null {
   const cv = window.cv;
   if (!cv) return null;
@@ -583,10 +561,6 @@ export function processWarpAndFilter(
   let srcCoords: any = null;
   let dstCoords: any = null;
   let M: any = null;
-
-  const resultCanvas = document.createElement('canvas');
-  resultCanvas.width = maxWidth;
-  resultCanvas.height = maxHeight;
 
   try {
     src = cv.imread(imageEl);
@@ -616,8 +590,27 @@ export function processWarpAndFilter(
     // フィルターを適用
     applyFilterToMat(warped, dst, filterMode);
 
+    // 回転を適用
+    if (rotation === 90) {
+      cv.rotate(dst, dst, cv.ROTATE_90_CLOCKWISE);
+    } else if (rotation === 180) {
+      cv.rotate(dst, dst, cv.ROTATE_180);
+    } else if (rotation === 270) {
+      cv.rotate(dst, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
+    }
+
+    const resultCanvas = document.createElement('canvas');
+    if (rotation === 90 || rotation === 270) {
+      resultCanvas.width = maxHeight;
+      resultCanvas.height = maxWidth;
+    } else {
+      resultCanvas.width = maxWidth;
+      resultCanvas.height = maxHeight;
+    }
+
     // 結果を描画
     cv.imshow(resultCanvas, dst);
+    return resultCanvas.toDataURL('image/jpeg', 0.95);
   } finally {
     if (src) { try { src.delete(); } catch(e){} }
     if (warped) { try { warped.delete(); } catch(e){} }
@@ -626,7 +619,5 @@ export function processWarpAndFilter(
     if (dstCoords) { try { dstCoords.delete(); } catch(e){} }
     if (M) { try { M.delete(); } catch(e){} }
   }
-
-  return resultCanvas.toDataURL('image/jpeg', 0.95);
 }
 

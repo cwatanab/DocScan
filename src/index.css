@@ -677,7 +677,7 @@ html, body {
 }
 .editor-image-preview {
   max-width: 100%;
-  max-height: 78vh;
+  max-height: 55vh;
   object-fit: contain;
   border-radius: 4px;
   border: 1px solid var(--border);
@@ -686,7 +686,7 @@ html, body {
 .editor-interactive-canvas {
   position: relative;
   max-width: 100%;
-  max-height: 78vh;
+  max-height: 55vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -733,12 +733,12 @@ html, body {
   border: 2px solid #fff;
 }
 .editor-footer {
-  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
   background-color: var(--bg-surface);
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 .editor-footer-row {
   display: flex;
@@ -774,28 +774,29 @@ html, body {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
-  min-width: 75px;
+  min-width: 85px;
   text-align: left;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 .filter-tabs {
   display: flex;
   background-color: var(--bg-app);
-  padding: 4px;
-  border-radius: 12px;
+  padding: 3px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   width: 260px;
   min-width: 260px;
 }
 .filter-tab-btn {
   flex: 1;
-  padding: 8px 6px;
+  padding: 5px 6px;
   font-size: 13px;
   font-weight: 600;
   border: none;
   background-color: transparent;
   color: var(--text-secondary);
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
