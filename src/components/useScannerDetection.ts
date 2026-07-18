@@ -27,8 +27,11 @@ interface UseScannerDetectionProps {
 }
 
 export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) {
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiModelLoaded, setAiModelLoaded] = useState(isAISegEngineLoaded());
+  const [aiModelStatus, setAiModelStatus] = useState<'unloaded' | 'loading' | 'loaded' | 'failed'>(() => {
+    return isAISegEngineLoaded() ? 'loaded' : 'unloaded';
+  });
+  const aiModelLoaded = aiModelStatus === 'loaded';
+  const aiLoading = aiModelStatus === 'loading';
 
   const isDetectingRef = useRef(false);
   const smoothCornersRef = useRef<Point[] | null>(null);
@@ -58,26 +61,23 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
 
   // AIモデルのプリロード
   useEffect(() => {
-    if (!aiModelLoaded && !aiLoading) {
-      setAiLoading(true);
+    if (aiModelStatus === 'unloaded') {
+      setAiModelStatus('loading');
       initDocSegEngine()
         .then((session) => {
           if (session) {
-            setAiModelLoaded(true);
-
+            setAiModelStatus('loaded');
           } else {
-            setAiModelLoaded(false);
+            setAiModelStatus('failed');
             console.warn("[useScannerDetection] AI model load failed.");
           }
         })
         .catch(err => {
+          setAiModelStatus('failed');
           console.error("[useScannerDetection] Failed to preload AI model:", err);
-        })
-        .finally(() => {
-          setAiLoading(false);
         });
     }
-  }, [aiModelLoaded, aiLoading]);
+  }, [aiModelStatus]);
 
   // カメラがオフになったらキャッシュをクリアする
   useEffect(() => {
