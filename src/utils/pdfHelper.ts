@@ -1,5 +1,30 @@
 import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import type { OcrResult } from './ocrHelper';
+
+// 日本語フォントをロードするヘルパー（ローカル優先、失敗時はCDNにフォールバック）
+async function loadJapaneseFont(): Promise<ArrayBuffer> {
+  const localPath = '/fonts/NotoSansJP-Regular.ttf';
+  const cdnUrl = 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf';
+
+  try {
+    const res = await fetch(localPath);
+    const contentType = res.headers.get('content-type');
+    // SPAのルーティングフォールバック等により、存在しないファイルに対してHTMLが返されるのを防ぐため、text/htmlは除外します
+    if (res.ok && contentType && !contentType.includes('text/html')) {
+      return await res.arrayBuffer();
+    }
+  } catch (e) {
+    console.warn('Failed to load local Japanese font, falling back to CDN:', e);
+  }
+
+  const res = await fetch(cdnUrl);
+  const contentType = res.headers.get('content-type');
+  if (!res.ok || (contentType && contentType.includes('text/html'))) {
+    throw new Error('Failed to fetch Japanese font from both local and CDN (invalid response)');
+  }
+  return await res.arrayBuffer();
+}
 
 // PDF用に画像を長辺1600pxにリサイズし、画質90%のJPEGとして再圧縮する
 async function compressImageForPdf(imageSrc: string, maxDimension: number = 1600): Promise<string> {
@@ -42,9 +67,18 @@ export async function createSearchablePdf(
 ): Promise<Blob> {
   const pdfDoc = await PDFDocument.create();
 
-  // 標準フォント (Helvetica: 埋め込みサイズ0KB。日本語テキストの選択・検索も問題なく動作します)
-  // テキストは透明(opacity: 0)で描画されるため、フォントの見た目は影響せず、ファイルサイズが2MB以上激減します
-  const standardFont = await pdfDoc.embedFont('Helvetica');
+  // fontkitを登録
+  pdfDoc.registerFontkit(fontkit);
+
+  // 日本語フォントをロードして埋め込む（サブセット化を有効にし、ファイルサイズ肥大化を防ぎます）
+  let jpFont: any;
+  try {
+    const fontBytes = await loadJapaneseFont();
+    jpFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+  } catch (e) {
+    console.error('Failed to embed Japanese font, falling back to Helvetica:', e);
+    jpFont = await pdfDoc.embedFont('Helvetica');
+  }
 
   for (const pageData of pages) {
     const { imageSrc, ocrResult } = pageData;
@@ -95,15 +129,14 @@ export async function createSearchablePdf(
 
         try {
           // テキストを描画 (不透明度 0 で透明にし、かつ座標とサイズを合わせる)
-          // Helveticaで描画しても、PDF内のテキスト情報としては正常に日本語が格納され、検索・コピー・選択が可能です
+          // 日本語対応フォントで描画することにより、PDF上で日本語の選択・コピー・検索が可能になります
           page.drawText(word.text, {
             x: x,
             y: y,
             size: fontSize,
-            font: standardFont,
+            font: jpFont,
             color: rgb(0, 0, 0),
             opacity: 0.0, // 見えないが、PDF上で選択・コピー・検索が可能
-            maxWidth: wordWidth * 1.2, // 縮尺調整用
           });
         } catch (e) {
           console.warn(`Could not draw word text "${word.text}":`, e);

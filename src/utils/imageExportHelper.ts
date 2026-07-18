@@ -113,43 +113,7 @@ export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0, w, h);
-        // 【必須仕様】8bit/256色への均等量子化減色 (R:3bit, G:3bit, B:2bit)
-        // 激しい等高線状 of ブロックノイズ（バンディング）を抑制するため、確率的ディザリングを適用
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imgData.data;
-        const len = data.length;
 
-        // 【最適化】確率的ディザリングの高速化
-        // ループ内の Math.random() 呼び出しを削減するため、1024要素のノイズテーブルを事前生成
-        const noiseSize = 1024;
-        const rNoiseTab = new Float32Array(noiseSize);
-        const gNoiseTab = new Float32Array(noiseSize);
-        const bNoiseTab = new Float32Array(noiseSize);
-        for (let j = 0; j < noiseSize; j++) {
-          rNoiseTab[j] = (Math.random() - 0.5) * 36;
-          gNoiseTab[j] = (Math.random() - 0.5) * 36;
-          bNoiseTab[j] = (Math.random() - 0.5) * 85;
-        }
-
-        let noiseIdx = 0;
-        for (let i = 0; i < len; i += 4) {
-          const idx = noiseIdx & 1023;
-          noiseIdx++;
-
-          const r = data[i] + rNoiseTab[idx];
-          const g = data[i+1] + gNoiseTab[idx];
-          const b = data[i+2] + bNoiseTab[idx];
-
-          // 均等量子化 & クランプの高速化 (Math.round, Math.min, Math.maxの関数コールをインライン展開・ビット演算化)
-          const nr = (((r * 0.027777777777777776) + 0.5) | 0) * 36;
-          const ng = (((g * 0.027777777777777776) + 0.5) | 0) * 36;
-          const nb = (((b * 0.011764705882352941) + 0.5) | 0) * 85;
-
-          data[i] = nr < 0 ? 0 : nr > 255 ? 255 : nr;
-          data[i+1] = ng < 0 ? 0 : ng > 255 ? 255 : ng;
-          data[i+2] = nb < 0 ? 0 : nb > 255 ? 255 : nb;
-        }
-        ctx.putImageData(imgData, 0, 0);
         
         canvas.toBlob((blob) => {
           if (blob) {
@@ -240,7 +204,7 @@ export const downloadSinglePage = async (
   const ts = timestamp || getFormattedTimestamp();
   const ext = format === 'png' ? 'png' : 'jpg';
   const blob = await convertToBlob(imageSrc, format);
-  triggerBlobDownload(blob, `SCAN_${ts}_${String(index + 1).padStart(3, '0')}.${ext}`);
+  triggerBlobDownload(blob, `DocScan_${ts}_${String(index + 1).padStart(3, '0')}.${ext}`);
 };
 
 /**
@@ -276,7 +240,7 @@ export const shareSinglePage = async (
   const ts = getFormattedTimestamp();
   const ext = format === 'png' ? 'png' : 'jpg';
   const mime = format === 'png' ? 'image/png' : 'image/jpeg';
-  const fileName = `SCAN_${ts}_${String(index + 1).padStart(3, '0')}.${ext}`;
+  const fileName = `DocScan_${ts}_${String(index + 1).padStart(3, '0')}.${ext}`;
   
   try {
     const blob = await convertToBlob(imageSrc, format);
@@ -312,7 +276,7 @@ export const shareAllPages = async (
 
   try {
     for (let i = 0; i < pages.length; i++) {
-      const fileName = `SCAN_${timestamp}_${String(i + 1).padStart(3, '0')}.${ext}`;
+      const fileName = `DocScan_${timestamp}_${String(i + 1).padStart(3, '0')}.${ext}`;
       const blob = await convertToBlob(pages[i], format);
       const file = new File([blob], fileName, { type: mime });
       filesList.push(file);

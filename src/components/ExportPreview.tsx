@@ -116,7 +116,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   const handleDownloadPdf = useCallback(async () => {
     const blob = await ensurePdfGenerated();
     if (!blob) return;
-    triggerBlobDownload(blob, `SCAN_${getFormattedTimestamp()}.pdf`);
+    triggerBlobDownload(blob, `DocScan_${getFormattedTimestamp()}.pdf`);
   }, [ensurePdfGenerated]);
 
   // JPEG(画像)として保存
@@ -160,7 +160,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     const blob = await ensurePdfGenerated();
     if (!blob) return;
     
-    const fileName = `SCAN_${getFormattedTimestamp()}.pdf`;
+    const fileName = `DocScan_${getFormattedTimestamp()}.pdf`;
     const file = new File([blob], fileName, { type: 'application/pdf' });
     
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -203,14 +203,6 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
 
     return (
       <div className="loading-screen-blurred">
-        {/* 背景にスキャンした画像をうっすらオーバーレイ配置 */}
-        {lastPageImage && (
-          <img
-            src={lastPageImage}
-            alt="Background scanned page"
-            className="loading-bg-image"
-          />
-        )}
         <div className="loading-content-wrapper">
           <div className="spinner spinner-large" />
           <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{title}</h3>

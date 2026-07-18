@@ -361,7 +361,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('color')}
-                className={`filter-tab-btn ${colorMode === 'color' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'color' && filterMode !== 'mono' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 カラー
@@ -369,10 +369,18 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('document')}
-                className={`filter-tab-btn ${colorMode === 'document' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'document' && filterMode !== 'mono' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 白黒
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMode('mono')}
+                className={`filter-tab-btn ${filterMode === 'mono' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                二値
               </button>
             </div>
           </div>

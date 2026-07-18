@@ -783,7 +783,7 @@ html, body {
   padding: 3px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  width: 260px;
+  flex: 1;
   min-width: 260px;
 }
 .filter-tab-btn {
