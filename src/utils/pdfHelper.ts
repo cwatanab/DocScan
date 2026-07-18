@@ -2,30 +2,17 @@ import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { OcrResult } from './ocrHelper';
 
-// 日本語フォントをロードするヘルパー（ローカル優先、失敗時はCDNにフォールバック）
-async function loadJapaneseFont(): Promise<{ bytes: ArrayBuffer; isOtf: boolean }> {
-  const localPath = '/fonts/NotoSansJP-Regular.ttf';
-  const cdnUrl = 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf';
+// IPAexゴシックフォントをロードするヘルパー（ローカルから取得）
+async function loadIPAexGothicFont(): Promise<ArrayBuffer> {
+  const localPath = '/fonts/ipaexg.ttf';
 
-  try {
-    const res = await fetch(localPath);
-    const contentType = res.headers.get('content-type');
-    // SPAのルーティングフォールバック等により、存在しないファイルに対してHTMLが返されるのを防ぐため、text/htmlは除外します
-    if (res.ok && contentType && !contentType.includes('text/html')) {
-      const bytes = await res.arrayBuffer();
-      return { bytes, isOtf: false };
-    }
-  } catch (e) {
-    console.warn('Failed to load local Japanese font, falling back to CDN:', e);
-  }
-
-  const res = await fetch(cdnUrl);
+  const res = await fetch(localPath);
   const contentType = res.headers.get('content-type');
-  if (!res.ok || (contentType && contentType.includes('text/html'))) {
-    throw new Error('Failed to fetch Japanese font from both local and CDN (invalid response)');
+  // SPAのルーティングフォールバック等により、存在しないファイルに対してHTMLが返されるのを防ぐため、text/htmlは除外します
+  if (res.ok && contentType && !contentType.includes('text/html')) {
+    return await res.arrayBuffer();
   }
-  const bytes = await res.arrayBuffer();
-  return { bytes, isOtf: true };
+  throw new Error('Failed to load IPAexGothic font from local path');
 }
 
 // PDF用に画像を長辺1600pxにリサイズし、画質90%のJPEGとして再圧縮する
@@ -72,15 +59,15 @@ export async function createSearchablePdf(
   // fontkitを登録
   pdfDoc.registerFontkit(fontkit);
 
-  // 日本語フォントをロードして埋め込む（サブセット化を有効にし、ファイルサイズ肥大化を防ぎます）
-  // ※ OTF形式の場合はfontkitのバグで破損するため、サブセット化を無効化します
-  let jpFont: any;
+  // IPAexゴシックフォントをロードして埋め込む（サブセット化を有効にし、ファイルサイズ肥大化を防ぎます）
+  let ipaFont: any;
   try {
-    const { bytes, isOtf } = await loadJapaneseFont();
-    jpFont = await pdfDoc.embedFont(bytes, { subset: !isOtf });
+    const fontBytes = await loadIPAexGothicFont();
+    // TrueTypeフォントなので、subset: true でも正常に動作します
+    ipaFont = await pdfDoc.embedFont(fontBytes, { subset: true });
   } catch (e) {
-    console.error('Failed to embed Japanese font, falling back to Helvetica:', e);
-    jpFont = await pdfDoc.embedFont('Helvetica');
+    console.error('Failed to embed IPAexGothic font, falling back to Helvetica:', e);
+    ipaFont = await pdfDoc.embedFont('Helvetica');
   }
 
   for (const pageData of pages) {
@@ -136,7 +123,7 @@ export async function createSearchablePdf(
             x: x,
             y: y,
             size: fontSize,
-            font: jpFont,
+            font: ipaFont,
             color: rgb(0, 0, 0),
             opacity: 0.0, // 見えないが、PDF上で選択・コピー・検索が可能
           });
