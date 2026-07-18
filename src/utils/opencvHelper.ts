@@ -191,7 +191,7 @@ export function warpImage(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, 
  * @param dst 出力 cv.Mat (RGBA または GRAY)
  * @param mode フィルターモード
  */
-export type FilterMode = 'color_enhanced' | 'color_original' | 'document_enhanced' | 'document_original' | 'mono';
+export type FilterMode = 'color_enhanced' | 'color_original' | 'document_enhanced' | 'document_original' | 'mono' | 'background_removed';
 
 export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
   const cv = window.cv;
@@ -334,6 +334,44 @@ export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
         15,
         10
       );
+    } else if (mode === 'background_removed') {
+      ycrcb = new cv.Mat();
+      cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
+
+      const small = new cv.Mat();
+      const scale = 0.25;
+      cv.resize(ycrcb, small, new cv.Size(), scale, scale, cv.INTER_LINEAR);
+
+      const smallBg = new cv.Mat();
+      lut = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9));
+      cv.dilate(small, smallBg, lut);
+      cv.medianBlur(smallBg, smallBg, 9);
+
+      const bg = new cv.Mat();
+      cv.resize(smallBg, bg, ycrcb.size(), 0, 0, cv.INTER_LINEAR);
+
+      channels = new cv.MatVector();
+      const bgChannels = new cv.MatVector();
+      cv.split(ycrcb, channels);
+      cv.split(bg, bgChannels);
+
+      for (let i = 0; i < 3; i++) {
+        const chan = channels.get(i);
+        const bgChan = bgChannels.get(i);
+        cv.divide(chan, bgChan, chan, 255, -1);
+      }
+
+      cv.merge(channels, ycrcb);
+      cv.cvtColor(ycrcb, dst, cv.COLOR_RGB2RGBA);
+
+      small.delete();
+      smallBg.delete();
+      bg.delete();
+      for (let i = 0; i < bgChannels.size(); i++) {
+        const m = bgChannels.get(i);
+        if (m) m.delete();
+      }
+      bgChannels.delete();
     }
   } finally {
     if (grayForStats) { try { grayForStats.delete(); } catch(e){} }

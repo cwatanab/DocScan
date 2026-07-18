@@ -31,7 +31,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilterMode || 'document_enhanced');
 
   // カラーモードと補正モードの派生状態
-  const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original') ? 'color' : 'document';
+  const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original' || filterMode === 'background_removed') ? 'color' : 'document';
   const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced') ? 'enhanced' : 'original';
 
   const handleSetColorMode = (newColorMode: 'color' | 'document') => {
@@ -361,7 +361,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('color')}
-                className={`filter-tab-btn ${colorMode === 'color' && filterMode !== 'mono' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'color' && filterMode !== 'mono' && filterMode !== 'background_removed' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 カラー
@@ -369,7 +369,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('document')}
-                className={`filter-tab-btn ${colorMode === 'document' && filterMode !== 'mono' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'document' && filterMode !== 'mono' && filterMode !== 'background_removed' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 白黒
@@ -381,6 +381,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 style={{ flex: 1 }}
               >
                 二値
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMode('background_removed')}
+                className={`filter-tab-btn ${filterMode === 'background_removed' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                背景除去
               </button>
             </div>
           </div>
