@@ -48,25 +48,7 @@ export function isAISegEngineLoaded(): boolean {
 export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
   if (pts.length !== 4) return false;
 
-  // 1. 各頂点での外積のz成分を計算し、すべての符号が一致（凸四角形）しているか確認
-  const crossProducts: number[] = [];
-  for (let i = 0; i < 4; i++) {
-    const pPrev = pts[(i + 3) % 4];
-    const pCurr = pts[i];
-    const pNext = pts[(i + 1) % 4];
-
-    const v1 = { x: pCurr.x - pPrev.x, y: pCurr.y - pPrev.y };
-    const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
-    crossProducts.push(v1.x * v2.y - v1.y * v2.x);
-  }
-
-  const allPositive = crossProducts.every(cp => cp > 0.0001);
-  const allNegative = crossProducts.every(cp => cp < -0.0001);
-  if (!allPositive && !allNegative) {
-    return false; // 凹型、自己交差、または一直線（三角形）
-  }
-
-  // 2. 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
+  // 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
   for (let i = 0; i < 4; i++) {
     const pPrev = pts[(i + 3) % 4];
     const pCurr = pts[i];
@@ -78,11 +60,12 @@ export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
     const len1 = Math.hypot(v1.x, v1.y);
     const len2 = Math.hypot(v2.x, v2.y);
 
-    if (len1 < 0.001 || len2 < 0.001) {
-      return false; // 辺の長さが極端に短い（つぶれている）
+    const denominator = len1 * len2;
+    if (denominator === 0) {
+      return false; // ゼロ除算の回避
     }
 
-    const cosTheta = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2);
+    const cosTheta = (v1.x * v2.x + v1.y * v2.y) / denominator;
     if (Math.abs(cosTheta) > maxCos) {
       return false; // 鋭角・鈍角制限
     }
@@ -189,26 +172,28 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const x2 = coordsData[4]; const y2 = coordsData[5]; // BR
     const x3 = coordsData[6]; const y3 = coordsData[7]; // BL
 
-    // (A) 四隅張り付きチェック: 各点が画面の端っこ (マージン 5%) に位置しているか
-    const margin = 0.05;
-    const isTlAtCorner = x0 < margin && y0 < margin;
-    const isTrAtCorner = x1 > (1 - margin) && y1 < margin;
-    const isBrAtCorner = x2 > (1 - margin) && y2 > (1 - margin);
-    const isBlAtCorner = x3 < margin && y3 > (1 - margin);
+    // (A) 面積による条件チェック (Shoelace公式による正規化面積計算)
+    const area = 0.5 * Math.abs(
+      (x0 * y1 - y0 * x1) +
+      (x1 * y2 - y1 * x2) +
+      (x2 * y3 - y2 * x3) +
+      (x3 * y0 - y3 * x0)
+    );
 
-    if (isTlAtCorner && isTrAtCorner && isBrAtCorner && isBlAtCorner) {
+    // 面積が画面全体の 7% 未満、または 85% を超える場合は誤検出として除外
+    if (area < 0.07 || area > 0.85) {
       return null;
     }
 
     // (B) 形状の歪みフィルター (三角形化・自己交差の排除)
-    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.960 (約16度) と緩めにチェック
+    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.900 (約25度) と緩めにチェック
     const rawPts = [
       { x: x0, y: y0 }, // TL
       { x: x1, y: y1 }, // TR
       { x: x2, y: y2 }, // BR
       { x: x3, y: y3 }  // BL
     ];
-    if (!checkShapeValidity(rawPts, 0.960)) {
+    if (!checkShapeValidity(rawPts, 0.900)) {
       return null;
     }
 
