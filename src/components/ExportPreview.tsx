@@ -195,7 +195,6 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   }, [ocrResults]);
 
   if (isProcessing) {
-    const lastPageImage = pages[pages.length - 1]; // スキャンされた最新の画像
     const title = exportMode === 'pdf' ? 'PDFの生成中' : '画像の書き出し中';
     const desc = exportMode === 'pdf' 
       ? '文字情報を埋め込み、検索可能なPDFを作成しています...'

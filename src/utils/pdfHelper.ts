@@ -121,7 +121,6 @@ export async function createSearchablePdf(
         // OCRのバウンディングボックス位置
         const x = word.bbox.x0 * scaleX;
         const y = imgHeight - (word.bbox.y1 * scaleY); // PDFは左下が原点なので反転
-        const wordWidth = (word.bbox.x1 - word.bbox.x0) * scaleX;
         const wordHeight = (word.bbox.y1 - word.bbox.y0) * scaleY;
 
         // フォントサイズの設定 (ボックスの高さに合わせる)
