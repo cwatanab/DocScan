@@ -492,12 +492,12 @@ html, body {
 .scanner-logo-wrapper {
   width: 48px; /* アイコンを少し大きく見せるため拡大 */
   height: 48px;
-  background: linear-gradient(135deg, #6366f1, #10b981);
+  background: #6190b0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 12px rgba(97, 144, 176, 0.5);
   flex-shrink: 0;
 }
 
