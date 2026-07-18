@@ -108,7 +108,15 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
     if (now - lastDetectionTimeRef.current > DETECTION_INTERVAL && !isDetectingRef.current) {
       isDetectingRef.current = true;
       try {
-        const detected = await detectDocumentAI(canvas);
+        // ONNX Runtime の推論ハング対策として、2000ms のタイムアウトを設定
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("AI corner detection timeout")), 2000)
+        );
+        const detected = await Promise.race([
+          detectDocumentAI(canvas),
+          timeoutPromise
+        ]);
+
         if (detected) {
           cachedCornersRef.current = detected;
           lastValidCornersRef.current = detected;
