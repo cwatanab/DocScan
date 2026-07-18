@@ -16,6 +16,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const [isSleeping, setIsSleeping] = React.useState(false);
+  const lastActiveTimeRef = useRef<number>(Date.now());
+  const SLEEP_TIMEOUT = 30000; // 30秒枠線未検出で省電力スリープモードへ
   
   // カメラストリーム制御のカスタムフック呼び出し
   const {
@@ -23,7 +27,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     errorMsg,
     stopCamera: stopCameraStream,
     animationFrameRef
-  } = useCameraStream({ videoRef });
+  } = useCameraStream({ videoRef, enabled: !isSleeping });
 
   // AI 境界検出とキャッシュバッファのカスタムフック呼び出し
   const {
@@ -37,6 +41,12 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
   const stopCamera = () => {
     stopCameraStream();
     resetDetection();
+  };
+
+  // スリープからの復帰
+  const handleWakeUp = () => {
+    lastActiveTimeRef.current = Date.now();
+    setIsSleeping(false);
   };
 
   // リアルタイム輪郭検出ループ
@@ -70,6 +80,16 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           // カスタムフックを呼び出して AI検出とフレーム蓄積を行う
           smoothCorners = await processDetectionFrame(canvas);
+
+          if (smoothCorners) {
+            lastActiveTimeRef.current = Date.now(); // 検出されている間は無操作タイマーをリセット
+          } else {
+            // 未検出の時間をチェック
+            const inactiveDuration = Date.now() - lastActiveTimeRef.current;
+            if (inactiveDuration > SLEEP_TIMEOUT) {
+              setIsSleeping(true);
+            }
+          }
         }
 
         // 緑の枠線は透過オーバーレイCanvasにのみ描画する
@@ -299,6 +319,59 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         </div>
       </div>
 
+      {/* 省電力スリープオーバーレイ (グラスモーフィズムデザイン) */}
+      {isSleeping && (
+        <div
+          onClick={handleWakeUp}
+          className="scanner-sleep-overlay"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(9, 13, 22, 0.90)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100000,
+            cursor: 'pointer',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            transition: 'opacity 0.3s ease'
+          }}
+        >
+          <div style={{
+            width: '80px',
+            height: '80px',
+            borderRadius: '50%',
+            background: 'rgba(97, 144, 176, 0.15)',
+            border: '2px solid rgba(97, 144, 176, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '20px',
+            boxShadow: '0 0 20px rgba(97, 144, 176, 0.2)'
+          }}>
+            <RefreshCw style={{ width: '32px', height: '32px', color: '#6190b0' }} />
+          </div>
+          <h2 style={{ color: '#ffffff', fontSize: '20px', marginBottom: '8px', fontWeight: 'bold' }}>省電力スリープモード</h2>
+          <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '14px', textAlign: 'center', margin: '0 24px 24px' }}>
+            一定時間枠線が検出されなかったため、カメラを一時停止しました。
+          </p>
+          <button style={{
+            background: 'linear-gradient(135deg, #6190b0 0%, #4b7391 100%)',
+            color: '#ffffff',
+            border: 'none',
+            padding: '12px 28px',
+            borderRadius: '24px',
+            fontSize: '15px',
+            fontWeight: 'bold',
+            boxShadow: '0 4px 15px rgba(97, 144, 176, 0.3)',
+            cursor: 'pointer'
+          }}>
+            画面をタップして再開
+          </button>
+        </div>
+      )}
     </div>
   );
 };

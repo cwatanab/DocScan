@@ -2,9 +2,10 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 
 interface UseCameraStreamProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  enabled?: boolean;
 }
 
-export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
+export const useCameraStream = ({ videoRef, enabled = true }: UseCameraStreamProps) => {
   const [cameraActive, setCameraActive] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -25,6 +26,11 @@ export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
 
   // カメラの起動
   useEffect(() => {
+    if (!enabled) {
+      stopCamera();
+      return;
+    }
+
     const startCamera = async () => {
       try {
         setErrorMsg(null);
@@ -64,7 +70,7 @@ export const useCameraStream = ({ videoRef }: UseCameraStreamProps) => {
     return () => {
       stopCamera();
     };
-  }, [videoRef, stopCamera]);
+  }, [videoRef, stopCamera, enabled]);
 
   return {
     cameraActive,
