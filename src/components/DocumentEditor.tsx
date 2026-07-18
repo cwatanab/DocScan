@@ -361,7 +361,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('color')}
-                className={`filter-tab-btn ${colorMode === 'color' && filterMode !== 'mono' && filterMode !== 'background_removed' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'color' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 カラー
@@ -369,26 +369,10 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               <button
                 type="button"
                 onClick={() => handleSetColorMode('document')}
-                className={`filter-tab-btn ${colorMode === 'document' && filterMode !== 'mono' && filterMode !== 'background_removed' ? 'filter-tab-btn-active' : ''}`}
+                className={`filter-tab-btn ${colorMode === 'document' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
               >
                 白黒
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterMode('mono')}
-                className={`filter-tab-btn ${filterMode === 'mono' ? 'filter-tab-btn-active' : ''}`}
-                style={{ flex: 1 }}
-              >
-                二値
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterMode('background_removed')}
-                className={`filter-tab-btn ${filterMode === 'background_removed' ? 'filter-tab-btn-active' : ''}`}
-                style={{ flex: 1 }}
-              >
-                背景除去
               </button>
             </div>
           </div>
@@ -417,8 +401,33 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
               </button>
             </div>
           </div>
+
+          {/* 行3: その他フィルター選択 */}
+          <div className="filter-tabs-container">
+            <span className="filter-tabs-label">
+              その他補正
+            </span>
+            <div className="filter-tabs">
+              <button
+                type="button"
+                onClick={() => setFilterMode('mono')}
+                className={`filter-tab-btn ${filterMode === 'mono' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                二値
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterMode('background_removed')}
+                className={`filter-tab-btn ${filterMode === 'background_removed' ? 'filter-tab-btn-active' : ''}`}
+                style={{ flex: 1 }}
+              >
+                背景除去
+              </button>
+            </div>
+          </div>
           
-          {/* 行2: 画像の回転 */}
+          {/* 行4: 画像の回転 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
               画像の回転
@@ -445,7 +454,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             </div>
           </div>
 
-          {/* 行3: 保存形式 */}
+          {/* 行5: 保存形式 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
               保存形式
