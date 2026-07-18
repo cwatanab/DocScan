@@ -32,7 +32,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   // カラーモードと補正モードの派生状態
   const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original' || filterMode === 'background_removed') ? 'color' : 'document';
-  const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced') ? 'enhanced' : 'original';
+  const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced' || filterMode === 'background_removed') ? 'enhanced' : 'original';
 
   const handleSetColorMode = (newColorMode: 'color' | 'document') => {
     const newMode: FilterMode = newColorMode === 'color'
