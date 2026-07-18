@@ -116,10 +116,13 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const bScale = 1.0 / (255.0 * 0.225);
     const bOffset = 0.406 / 0.225;
 
+    let srcIdx = 0;
+    let dstIdx = 0;
     for (let i = 0; i < numPixels; i++) {
-      inputBuffer[i * 3] = data[i * 4] * rScale - rOffset;
-      inputBuffer[i * 3 + 1] = data[i * 4 + 1] * gScale - gOffset;
-      inputBuffer[i * 3 + 2] = data[i * 4 + 2] * bScale - bOffset;
+      inputBuffer[dstIdx++] = data[srcIdx++] * rScale - rOffset;
+      inputBuffer[dstIdx++] = data[srcIdx++] * gScale - gOffset;
+      inputBuffer[dstIdx++] = data[srcIdx++] * bScale - bOffset;
+      srcIdx++; // アルファ値をスキップ
     }
 
     const inputTensor = new ort.Tensor('float32', inputBuffer, [1, inputSize, inputSize, 3]);
@@ -180,8 +183,8 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       (x3 * y0 - y3 * x0)
     );
 
-    // 面積が画面全体の 10% 未満、または 90% を超える場合は誤検出として除外
-    if (area < 0.10 || area > 0.90) {
+    // 面積が画面全体の 5% 未満、または 90% を超える場合は誤検出として除外
+    if (area < 0.05 || area > 0.90) {
       return null;
     }
 

@@ -132,7 +132,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setWarpedImage(url);
       setIsWarped(true);
     }
-  }, [corners, imageSize.width, imageSize.height, filterMode, cvReady]);
+  }, [corners, filterMode, cvReady]);
 
   // initialIsWarpedがtrueの場合、画像サイズと4隅確定後に自動で台形補正を実行する
   useEffect(() => {

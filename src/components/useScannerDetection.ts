@@ -30,6 +30,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiModelLoaded, setAiModelLoaded] = useState(isAISegEngineLoaded());
 
+  const isDetectingRef = useRef(false);
   const smoothCornersRef = useRef<Point[] | null>(null);
   const cachedCornersRef = useRef<Point[] | null>(null);
   const lastValidCornersRef = useRef<Point[] | null>(null);
@@ -103,8 +104,9 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
 
     const now = performance.now();
 
-    // 1. AI 境界検出の実行 (300ms 間隔)
-    if (now - lastDetectionTimeRef.current > DETECTION_INTERVAL) {
+    // 1. AI 境界検出の実行 (300ms 間隔 & 推論中ではない場合のみ)
+    if (now - lastDetectionTimeRef.current > DETECTION_INTERVAL && !isDetectingRef.current) {
+      isDetectingRef.current = true;
       try {
         const detected = await detectDocumentAI(canvas);
         if (detected) {
@@ -116,6 +118,8 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
         }
       } catch (err) {
         console.error("AI detection error during preview: ", err);
+      } finally {
+        isDetectingRef.current = false;
       }
       lastDetectionTimeRef.current = now;
     }

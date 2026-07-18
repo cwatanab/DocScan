@@ -86,18 +86,15 @@ export function loadOpenCV(timeoutMs: number = 90000): Promise<void> {
 export function sortPoints(points: Point[]): Point[] {
   if (points.length !== 4) return points;
 
-  // x + y が最小 -> 左上, 最大 -> 右下
-  // y - x が最小 -> 右上, 最大 -> 左下
-  const sorted = [...points];
-  
-  // 和と差を計算
-  const sum = sorted.map(p => p.x + p.y);
-  const diff = sorted.map(p => p.y - p.x);
+  // x座標でソートして、左側の2点と右側の2点に分ける
+  const sortedByX = [...points].sort((a, b) => a.x - b.x);
+  const leftMost = [sortedByX[0], sortedByX[1]];
+  const rightMost = [sortedByX[2], sortedByX[3]];
 
-  const topLeft = sorted[sum.indexOf(Math.min(...sum))];
-  const bottomRight = sorted[sum.indexOf(Math.max(...sum))];
-  const topRight = sorted[diff.indexOf(Math.min(...diff))];
-  const bottomLeft = sorted[diff.indexOf(Math.max(...diff))];
+  // 左側の2点のうち、y座標が小さい方が左上、大きい方が左下
+  const [topLeft, bottomLeft] = leftMost.sort((a, b) => a.y - b.y);
+  // 右側の2点のうち、y座標が小さい方が右上、大きい方が右下
+  const [topRight, bottomRight] = rightMost.sort((a, b) => a.y - b.y);
 
   return [topLeft, topRight, bottomRight, bottomLeft];
 }
@@ -188,22 +185,16 @@ export function warpImage(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, 
   return dstCanvas;
 }
 
-
-
-
-
 /**
- * カラーモードフィルタ（白黒、コントラスト強調など）を適用する
- * @param canvas 適用対象のCanvas
- * @param mode 'color' | 'mono' | 'document'
- * @returns フィルタ適用後の新しいCanvas
+ * cv.Mat に対して直接フィルター処理を適用する
+ * @param src 入力 cv.Mat (RGBA)
+ * @param dst 出力 cv.Mat (RGBA または GRAY)
+ * @param mode フィルターモード
  */
-export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 'document'): HTMLCanvasElement {
+export function applyFilterToMat(src: any, dst: any, mode: 'color' | 'mono' | 'document'): void {
   const cv = window.cv;
-  if (!cv) return canvas;
+  if (!cv) return;
 
-  let src: any = null;
-  let dst: any = null;
   let grayForStats: any = null;
   let meanMat: any = null;
   let stddevMat: any = null;
@@ -218,14 +209,7 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
   let bg: any = null;
   let rgb: any = null;
 
-  const resultCanvas = document.createElement('canvas');
-  resultCanvas.width = canvas.width;
-  resultCanvas.height = canvas.height;
-
   try {
-    src = cv.imread(canvas);
-    dst = new cv.Mat();
-
     // --- 自動補正のための画像解析 (平均輝度の算出) ---
     let meanVal = 128;
     try {
@@ -244,7 +228,6 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     }
 
     if (mode === 'color') {
-      // カラーモード: YCrCb 空間に変換し、輝度チャンネル Y のみに対して背景除算とコントラスト補正を行うことで色ズレを完全に防ぎます。
       ycrcb = new cv.Mat();
       cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
       cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
@@ -256,22 +239,18 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
       crChan = channels.get(1); // Cr (色度)
       cbChan = channels.get(2); // Cb (色度)
       
-      // ガンマ補正用LUTの作成
       lut = new cv.Mat(1, 256, cv.CV_8UC1);
       const data = new Uint8Array(256);
       
-      // 画像全体の明るさ (meanVal) に応じて、ガンマとしきい値を動的に自動調整する (コントラストと文字を引き締める調整)
       let gamma = 1.2;
       let minVal = 15;
       let maxVal = 240;
 
       if (meanVal < 130) {
-        // 暗い画像 (露出不足など) ➔ ガンマを下げて明るくし、黒つぶれを防ぐ
         gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
         minVal = Math.max(10, 15 - Math.round((130 - meanVal) / 10));
         maxVal = Math.max(190, 240 - Math.round((130 - meanVal) / 3));
       } else {
-        // 明るい画像 ➔ ガンマを上げてコントラストを引き締める
         gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
         minVal = Math.min(25, 15 + Math.round((meanVal - 130) / 12));
       }
@@ -290,7 +269,6 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
       }
       lut.data.set(data);
 
-      // Yチャンネルに対して背景除算（影消し）とLUT補正を適用
       const kernelSize = 33;
       M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kernelSize, kernelSize));
 
@@ -299,10 +277,7 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
       cv.dilate(yChan, dilated, M);
       cv.medianBlur(dilated, bg, kernelSize);
       
-      // 影ムラを除去（除算）し背景を白く飛ばす
       cv.divide(yChan, bg, yChan, 255.0);
-      
-      // ガンマ・レベル補正を適用
       cv.LUT(yChan, lut, yChan);
       
       dilated.delete(); dilated = null;
@@ -310,21 +285,18 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
       M.delete(); M = null;
       lut.delete(); lut = null;
 
-      // 再合成して RGB に変換してから RGBA に戻す (COLOR_YCrCb2RGBA は OpenCV.js で未定義のため)
       cv.merge(channels, ycrcb);
       rgb = new cv.Mat();
       cv.cvtColor(ycrcb, rgb, cv.COLOR_YCrCb2RGB);
       cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
       rgb.delete(); rgb = null;
 
-      // リソースの解放
       yChan.delete(); yChan = null;
       crChan.delete(); crChan = null;
       cbChan.delete(); cbChan = null;
       channels.delete(); channels = null;
       ycrcb.delete(); ycrcb = null;
     } else if (mode === 'mono') {
-      // モノクロ化（白黒2値化）
       cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
       cv.adaptiveThreshold(
         dst,
@@ -336,34 +308,29 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
         10
       );
     } else if (mode === 'document') {
-      // ドキュメントモード: 背景の影のムラを除算(Division)で完璧にフラットにした後、ガンマ補正でくっきり白黒化する
       cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
       
-      // 背景の推定 (膨張・平滑化)
       dilated = new cv.Mat();
       bg = new cv.Mat();
       M = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(33, 33));
       cv.dilate(dst, dilated, M);
       cv.medianBlur(dilated, bg, 33);
       
-      // 影消し (背景を確実に白く飛ばすため 100% 適用に戻す)
       cv.divide(dst, bg, dst, 255.0);
       
-      // ガンマ補正 & しきい値ストレッチ (紙の白さを保証しつつ、文字の極端なギラつき・掠れを防ぐマイルドな設定)
       lut = new cv.Mat(1, 256, cv.CV_8UC1);
       const data = new Uint8Array(256);
       
-      // コントラストパラメータ (背景を白く、文字をくっきり引き締めるガンマ補正)
       let gamma = 1.35;
       let minVal = 20;
       let maxVal = 230;
 
       if (meanVal < 110) {
-        gamma = 1.1; // 暗い画像は少し明るく調整しつつコントラストも残す
+        gamma = 1.1;
         minVal = 10;
         maxVal = 220;
       } else if (meanVal > 200) {
-        gamma = 1.5; // 明るい画像はさらに強めにコントラストを効かせる
+        gamma = 1.5;
         minVal = 30;
         maxVal = 240;
       }
@@ -388,12 +355,7 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
       M.delete(); M = null;
       lut.delete(); lut = null;
     }
-
-    cv.imshow(resultCanvas, dst);
   } finally {
-    // メモリ解放 (例外時にも確実に実行して Wasm ヒープリークを防ぐ)
-    if (src) { try { src.delete(); } catch(e){} }
-    if (dst) { try { dst.delete(); } catch(e){} }
     if (grayForStats) { try { grayForStats.delete(); } catch(e){} }
     if (meanMat) { try { meanMat.delete(); } catch(e){} }
     if (stddevMat) { try { stddevMat.delete(); } catch(e){} }
@@ -418,12 +380,40 @@ export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 
     if (bg) { try { bg.delete(); } catch(e){} }
     if (rgb) { try { rgb.delete(); } catch(e){} }
   }
+}
+
+/**
+ * カラーモードフィルタ（白黒、コントラスト強調など）を適用する
+ * @param canvas 適用対象のCanvas
+ * @param mode 'color' | 'mono' | 'document'
+ * @returns フィルタ適用後の新しいCanvas
+ */
+export function applyFilter(canvas: HTMLCanvasElement, mode: 'color' | 'mono' | 'document'): HTMLCanvasElement {
+  const cv = window.cv;
+  if (!cv) return canvas;
+
+  let src: any = null;
+  let dst: any = null;
+
+  const resultCanvas = document.createElement('canvas');
+  resultCanvas.width = canvas.width;
+  resultCanvas.height = canvas.height;
+
+  try {
+    src = cv.imread(canvas);
+    dst = new cv.Mat();
+    applyFilterToMat(src, dst, mode);
+    cv.imshow(resultCanvas, dst);
+  } finally {
+    if (src) { try { src.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
+  }
 
   return resultCanvas;
 }
 
 /**
- * 画像を90度反時計回りに回転させる（左回転）
+ * 画像エレメントを90度反時計回りに回転させる（左回転）
  * @param canvas 回転対象 of Canvas
  * @returns 回転後の新しいCanvas
  */
@@ -460,8 +450,8 @@ export function rotateImage90(srcImgOrCanvas: HTMLCanvasElement | HTMLImageEleme
     cv.imshow(resultCanvas, dst);
   } finally {
     // 例外時にも確実に解放
-    if (src) src.delete();
-    if (dst) dst.delete();
+    if (src) { try { src.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
   }
 
   return resultCanvas;
@@ -476,14 +466,20 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
   const cv = window.cv;
   if (!cv) return 0;
 
-  const src = cv.imread(canvas);
-  const gray = new cv.Mat();
-  const laplacian = new cv.Mat();
-  const mean = new cv.Mat();
-  const stddev = new cv.Mat();
+  let src: any = null;
+  let gray: any = null;
+  let laplacian: any = null;
+  let mean: any = null;
+  let stddev: any = null;
 
   let score = 0;
   try {
+    src = cv.imread(canvas);
+    gray = new cv.Mat();
+    laplacian = new cv.Mat();
+    mean = new cv.Mat();
+    stddev = new cv.Mat();
+
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     // ラプラシアンフィルタを適用 (2階微分エッジ抽出)
     cv.Laplacian(gray, laplacian, cv.CV_64F, 1, 1, 0, cv.BORDER_DEFAULT);
@@ -495,11 +491,11 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
   } catch (e) {
     console.error("Error in calculating focus score: ", e);
   } finally {
-    src.delete();
-    gray.delete();
-    laplacian.delete();
-    mean.delete();
-    stddev.delete();
+    if (src) { try { src.delete(); } catch(e){} }
+    if (gray) { try { gray.delete(); } catch(e){} }
+    if (laplacian) { try { laplacian.delete(); } catch(e){} }
+    if (mean) { try { mean.delete(); } catch(e){} }
+    if (stddev) { try { stddev.delete(); } catch(e){} }
   }
 
   return score;
@@ -516,11 +512,14 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
     return 'document'; // フォールバック
   }
 
-  let src = cv.imread(canvas);
-  let hsv = new cv.Mat();
+  let src: any = null;
+  let hsv: any = null;
   let channels: any = null;
   
   try {
+    src = cv.imread(canvas);
+    hsv = new cv.Mat();
+
     // 1. カラーかどうかの判定 (HSVに変換し、Sチャンネルの平均値を見る)
     cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
     cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
@@ -547,8 +546,8 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color' | 'docum
         channels.delete();
       } catch(err){}
     }
-    hsv.delete();
-    src.delete();
+    if (hsv) { try { hsv.delete(); } catch(e){} }
+    if (src) { try { src.delete(); } catch(e){} }
   }
 
   return 'document';
@@ -562,8 +561,72 @@ export function processWarpAndFilter(
   corners: Point[],
   filterMode: 'color' | 'document'
 ): string | null {
-  const warpedCanvas = warpImage(imageEl, corners);
-  const filteredCanvas = applyFilter(warpedCanvas, filterMode);
-  return filteredCanvas.toDataURL('image/jpeg', 0.95);
+  const cv = window.cv;
+  if (!cv) return null;
+
+  // 頂点のソート
+  const sortedCorners = sortPoints(corners);
+  const [tl, tr, br, bl] = sortedCorners;
+
+  // 補正後の縦横サイズを算出
+  const widthA = distance(br, bl);
+  const widthB = distance(tr, tl);
+  const maxWidth = Math.max(widthA, widthB);
+
+  const heightA = distance(tr, br);
+  const heightB = distance(tl, bl);
+  const maxHeight = Math.max(heightA, heightB);
+
+  let src: any = null;
+  let warped: any = null;
+  let dst: any = null;
+  let srcCoords: any = null;
+  let dstCoords: any = null;
+  let M: any = null;
+
+  const resultCanvas = document.createElement('canvas');
+  resultCanvas.width = maxWidth;
+  resultCanvas.height = maxHeight;
+
+  try {
+    src = cv.imread(imageEl);
+    warped = new cv.Mat();
+
+    // 変換元の4頂点
+    srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      tl.x, tl.y,
+      tr.x, tr.y,
+      br.x, br.y,
+      bl.x, bl.y
+    ]);
+
+    // 変換後の4頂点
+    dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      maxWidth, 0,
+      maxWidth, maxHeight,
+      0, maxHeight
+    ]);
+
+    // 変換マトリクスを取得して適用
+    M = cv.getPerspectiveTransform(srcCoords, dstCoords);
+    cv.warpPerspective(src, warped, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+    dst = new cv.Mat();
+    // フィルターを適用
+    applyFilterToMat(warped, dst, filterMode);
+
+    // 結果を描画
+    cv.imshow(resultCanvas, dst);
+  } finally {
+    if (src) { try { src.delete(); } catch(e){} }
+    if (warped) { try { warped.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
+    if (srcCoords) { try { srcCoords.delete(); } catch(e){} }
+    if (dstCoords) { try { dstCoords.delete(); } catch(e){} }
+    if (M) { try { M.delete(); } catch(e){} }
+  }
+
+  return resultCanvas.toDataURL('image/jpeg', 0.95);
 }
 

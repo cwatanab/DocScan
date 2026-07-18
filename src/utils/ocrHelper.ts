@@ -45,28 +45,35 @@ function preprocessImageForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   // メモリ負荷を考慮し、前処理時も最大辺2240px程度に抑えてOpenCVに入力
   const inputCanvas = resizeCanvas(canvas, 2240);
 
-  const src = cv.imread(inputCanvas);
-  const dst = new cv.Mat();
-  
-  // 1. グレースケール化を適用
-  cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+  let src: any = null;
+  let dst: any = null;
+  let blurred: any = null;
 
-  // 2. マイルドなアンシャープマスク (手ブレ・ピンボケによる輪郭のボヤけを引き締める)
-  // 文字のエッジに悪影響を与えないよう、以前(1.6 / -0.6)より遥かにマイルドな重み(1.3 / -0.3)で適用します。
-  const blurred = new cv.Mat();
-  cv.GaussianBlur(dst, blurred, new cv.Size(3, 3), 1.0, 1.0);
-  cv.addWeighted(dst, 1.3, blurred, -0.3, 0, dst);
-  blurred.delete();
-
-  // 結果の書き出し
   const resultCanvas = document.createElement('canvas');
   resultCanvas.width = inputCanvas.width;
   resultCanvas.height = inputCanvas.height;
-  cv.imshow(resultCanvas, dst);
 
-  // リソースの削除
-  src.delete();
-  dst.delete();
+  try {
+    src = cv.imread(inputCanvas);
+    dst = new cv.Mat();
+    
+    // 1. グレースケール化を適用
+    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+
+    // 2. マイルドなアンシャープマスク (手ブレ・ピンボケによる輪郭のボヤけを引き締める)
+    // 文字のエッジに悪影響を与えないよう、以前(1.6 / -0.6)より遥かにマイルドな重み(1.3 / -0.3)で適用します。
+    blurred = new cv.Mat();
+    cv.GaussianBlur(dst, blurred, new cv.Size(3, 3), 1.0, 1.0);
+    cv.addWeighted(dst, 1.3, blurred, -0.3, 0, dst);
+
+    // 結果の書き出し
+    cv.imshow(resultCanvas, dst);
+  } finally {
+    // リソースの削除
+    if (src) { try { src.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
+    if (blurred) { try { blurred.delete(); } catch(e){} }
+  }
 
   return resultCanvas;
 }
@@ -247,80 +254,96 @@ function dbPostProcess(
   const cv = window.cv;
   if (!cv) return [];
 
-  const predMat = new cv.Mat(predHeight, predWidth, cv.CV_32FC1);
-  predMat.data32F.set(predData);
+  let predMat: any = null;
+  let binaryMat: any = null;
+  let contours: any = null;
+  let hierarchy: any = null;
 
-  const binaryMat = new cv.Mat();
-  cv.threshold(predMat, binaryMat, 0.3, 255, cv.THRESH_BINARY);
-  binaryMat.convertTo(binaryMat, cv.CV_8UC1);
+  try {
+    predMat = new cv.Mat(predHeight, predWidth, cv.CV_32FC1);
+    predMat.data32F.set(predData);
 
-  const contours = new cv.MatVector();
-  const hierarchy = new cv.Mat();
-  cv.findContours(binaryMat, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    binaryMat = new cv.Mat();
+    cv.threshold(predMat, binaryMat, 0.3, 255, cv.THRESH_BINARY);
+    binaryMat.convertTo(binaryMat, cv.CV_8UC1);
 
-  const boxes: number[][][] = [];
-  const ratioX = origWidth / predWidth;
-  const ratioY = origHeight / predHeight;
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(binaryMat, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-  for (let i = 0; i < contours.size(); ++i) {
-    const contour = contours.get(i);
-    const peri = cv.arcLength(contour, true);
-    if (peri < 12) {
+    const boxes: number[][][] = [];
+    const ratioX = origWidth / predWidth;
+    const ratioY = origHeight / predHeight;
+
+    for (let i = 0; i < contours.size(); ++i) {
+      const contour = contours.get(i);
+      const peri = cv.arcLength(contour, true);
+      if (peri < 12) {
+        contour.delete();
+        continue;
+      }
+
+      const rect = cv.minAreaRect(contour);
+      
+      // 検出領域の確信度平均（スコア）を算出し、ノイズを除去する (ピンボケ対策のため0.5に緩和)
+      const score = calculateBoxScore(predMat, contour);
+      if (score < 0.5) {
+        contour.delete();
+        continue;
+      }
+
+      // 精密な unclip 処理 (RotatedRectの幅・高さを直接平行拡張することで、アスペクト比を維持し歪みを防止する)
+      const w_rect = rect.size.width;
+      const h_rect = rect.size.height;
+      const area = w_rect * h_rect;
+      const perimeter = 2 * (w_rect + h_rect);
+      const distance = perimeter > 0 ? (area * unclipRatio) / perimeter : 0;
+
+      rect.size.width += 2 * distance;
+      rect.size.height += 2 * distance;
+
+      const pts = getRotatedRectPoints(rect);
+      const sortedPts = sortPoints(pts);
+
+      const finalPts = sortedPts.map(p => [
+        Math.min(Math.max(0, p[0] * ratioX), origWidth),
+        Math.min(Math.max(0, p[1] * ratioY), origHeight)
+      ]);
+
+      const w = Math.sqrt((finalPts[1][0] - finalPts[0][0]) ** 2 + (finalPts[1][1] - finalPts[0][1]) ** 2);
+      const h = Math.sqrt((finalPts[3][0] - finalPts[0][0]) ** 2 + (finalPts[3][1] - finalPts[0][1]) ** 2);
+      if (w < 4 || h < 4) {
+        contour.delete();
+        continue;
+      }
+
+      boxes.push(finalPts);
       contour.delete();
-      continue;
     }
 
-    const rect = cv.minAreaRect(contour);
-    
-    // 検出領域の確信度平均（スコア）を算出し、ノイズを除去する (ピンボケ対策のため0.5に緩和)
-    const score = calculateBoxScore(predMat, contour);
-    if (score < 0.5) {
-      contour.delete();
-      continue;
+    // 上から順にソート
+    boxes.sort((a, b) => {
+      const ay = (a[0][1] + a[1][1] + a[2][1] + a[3][1]) / 4;
+      const by = (b[0][1] + b[1][1] + b[2][1] + b[3][1]) / 4;
+      return ay - by;
+    });
+
+    return boxes;
+  } finally {
+    if (predMat) { try { predMat.delete(); } catch(e){} }
+    if (binaryMat) { try { binaryMat.delete(); } catch(e){} }
+    if (hierarchy) { try { hierarchy.delete(); } catch(e){} }
+    if (contours) {
+      // 例外時などの解放漏れを防ぐために明示的に中身を delete する
+      for (let i = 0; i < contours.size(); i++) {
+        try {
+          const c = contours.get(i);
+          if (c) c.delete();
+        } catch (e) {}
+      }
+      try { contours.delete(); } catch(e){}
     }
-
-    // 精密な unclip 処理 (RotatedRectの幅・高さを直接平行拡張することで、アスペクト比を維持し歪みを防止する)
-    const w_rect = rect.size.width;
-    const h_rect = rect.size.height;
-    const area = w_rect * h_rect;
-    const perimeter = 2 * (w_rect + h_rect);
-    const distance = perimeter > 0 ? (area * unclipRatio) / perimeter : 0;
-
-    rect.size.width += 2 * distance;
-    rect.size.height += 2 * distance;
-
-    const pts = getRotatedRectPoints(rect);
-    const sortedPts = sortPoints(pts);
-
-    const finalPts = sortedPts.map(p => [
-      Math.min(Math.max(0, p[0] * ratioX), origWidth),
-      Math.min(Math.max(0, p[1] * ratioY), origHeight)
-    ]);
-
-    const w = Math.sqrt((finalPts[1][0] - finalPts[0][0]) ** 2 + (finalPts[1][1] - finalPts[0][1]) ** 2);
-    const h = Math.sqrt((finalPts[3][0] - finalPts[0][0]) ** 2 + (finalPts[3][1] - finalPts[0][1]) ** 2);
-    if (w < 4 || h < 4) {
-      contour.delete();
-      continue;
-    }
-
-    boxes.push(finalPts);
-    contour.delete();
   }
-
-  predMat.delete();
-  binaryMat.delete();
-  contours.delete();
-  hierarchy.delete();
-
-  // 上から順にソート
-  boxes.sort((a, b) => {
-    const ay = (a[0][1] + a[1][1] + a[2][1] + a[3][1]) / 4;
-    const by = (b[0][1] + b[1][1] + b[2][1] + b[3][1]) / 4;
-    return ay - by;
-  });
-
-  return boxes;
 }
 
 /**
@@ -344,7 +367,11 @@ function getCropImage(canvas: HTMLCanvasElement, box: number[][]): HTMLCanvasEle
   const cv = window.cv;
   if (!cv) return canvas;
 
-  const src = cv.imread(canvas);
+  let src: any = null;
+  let srcTri: any = null;
+  let dstTri: any = null;
+  let M: any = null;
+  let dst: any = null;
 
   const x0 = box[0][0], y0 = box[0][1];
   const x1 = box[1][0], y1 = box[1][1];
@@ -360,34 +387,39 @@ function getCropImage(canvas: HTMLCanvasElement, box: number[][]): HTMLCanvasEle
     Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
   );
 
-  const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    x0, y0,
-    x1, y1,
-    x2, y2,
-    x3, y3
-  ]);
-
-  const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    0, 0,
-    width, 0,
-    width, height,
-    0, height
-  ]);
-
-  const M = cv.getPerspectiveTransform(srcTri, dstTri);
-  const dst = new cv.Mat();
-  cv.warpPerspective(src, dst, M, new cv.Size(width, height), cv.INTER_CUBIC, cv.BORDER_REPLICATE);
-
   const cropCanvas = document.createElement('canvas');
   cropCanvas.width = width;
   cropCanvas.height = height;
-  cv.imshow(cropCanvas, dst);
 
-  src.delete();
-  srcTri.delete();
-  dstTri.delete();
-  M.delete();
-  dst.delete();
+  try {
+    src = cv.imread(canvas);
+
+    srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      x0, y0,
+      x1, y1,
+      x2, y2,
+      x3, y3
+    ]);
+
+    dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      width, 0,
+      width, height,
+      0, height
+    ]);
+
+    M = cv.getPerspectiveTransform(srcTri, dstTri);
+    dst = new cv.Mat();
+    cv.warpPerspective(src, dst, M, new cv.Size(width, height), cv.INTER_CUBIC, cv.BORDER_REPLICATE);
+
+    cv.imshow(cropCanvas, dst);
+  } finally {
+    if (src) { try { src.delete(); } catch(e){} }
+    if (srcTri) { try { srcTri.delete(); } catch(e){} }
+    if (dstTri) { try { dstTri.delete(); } catch(e){} }
+    if (M) { try { M.delete(); } catch(e){} }
+    if (dst) { try { dst.delete(); } catch(e){} }
+  }
 
   return cropCanvas;
 }
@@ -430,10 +462,12 @@ function preprocessRecImage(canvas: HTMLCanvasElement): ort.Tensor {
 
   // HWC to NCHW, mean=0.5, std=0.5 (最適化: 除算を事前乗算スケールにまとめ演算負荷を低減)
   const scale = 2.0 / 255.0;
+  let srcIdx = 0;
   for (let i = 0; i < numPixels; i++) {
-    inputBuffer[i] = data[i * 4] * scale - 1.0;
-    inputBuffer[numPixels + i] = data[i * 4 + 1] * scale - 1.0;
-    inputBuffer[numPixels * 2 + i] = data[i * 4 + 2] * scale - 1.0;
+    inputBuffer[i] = data[srcIdx++] * scale - 1.0;
+    inputBuffer[numPixels + i] = data[srcIdx++] * scale - 1.0;
+    inputBuffer[numPixels * 2 + i] = data[srcIdx++] * scale - 1.0;
+    srcIdx++; // アルファ値をスキップ
   }
 
   return new ort.Tensor('float32', inputBuffer, [1, 3, targetHeight, targetWidth]);
@@ -564,10 +598,12 @@ export async function performOcr(
     const bScale = 1.0 / (255.0 * 0.225);
     const bOffset = 0.406 / 0.225;
 
+    let srcIdx = 0;
     for (let i = 0; i < detNumPixels; i++) {
-      detInputBuffer[i] = detData[i * 4] * rScale - rOffset;
-      detInputBuffer[detNumPixels + i] = detData[i * 4 + 1] * gScale - gOffset;
-      detInputBuffer[detNumPixels * 2 + i] = detData[i * 4 + 2] * bScale - bOffset;
+      detInputBuffer[i] = detData[srcIdx++] * rScale - rOffset;
+      detInputBuffer[detNumPixels + i] = detData[srcIdx++] * gScale - gOffset;
+      detInputBuffer[detNumPixels * 2 + i] = detData[srcIdx++] * bScale - bOffset;
+      srcIdx++; // アルファ値をスキップ
     }
 
     const detTensor = new ort.Tensor('float32', detInputBuffer, [1, 3, detHeight, detWidth]);
