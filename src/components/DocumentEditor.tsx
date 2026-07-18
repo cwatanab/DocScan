@@ -36,14 +36,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   const handleSetColorMode = (newColorMode: 'color' | 'document') => {
     const newMode: FilterMode = newColorMode === 'color'
-      ? (enhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
+      ? (enhancementMode === 'enhanced' ? 'background_removed' : 'color_original')
       : (enhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
     setFilterMode(newMode);
   };
 
   const handleSetEnhancementMode = (newEnhancementMode: 'enhanced' | 'original') => {
     const newMode: FilterMode = colorMode === 'color'
-      ? (newEnhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
+      ? (newEnhancementMode === 'enhanced' ? 'background_removed' : 'color_original')
       : (newEnhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
     setFilterMode(newMode);
   };
@@ -140,6 +140,9 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       // 一時的な台形補正を行い、最適なフィルターモードを自動判定する (warpImageは直接ImageElementを受け取れるため、一時Canvasへのコピーを回避しメモリ消費を抑えます)
       const warpedCanvas = warpImage(imageRef.current, corners);
       targetFilterMode = detectOptimalFilter(warpedCanvas);
+      if (targetFilterMode === 'color_enhanced') {
+        targetFilterMode = 'background_removed';
+      }
       setFilterMode(targetFilterMode); // UIの選択状態を更新
     }
     
@@ -402,32 +405,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             </div>
           </div>
 
-          {/* 行3: その他フィルター選択 */}
-          <div className="filter-tabs-container">
-            <span className="filter-tabs-label">
-              その他補正
-            </span>
-            <div className="filter-tabs">
-              <button
-                type="button"
-                onClick={() => setFilterMode('mono')}
-                className={`filter-tab-btn ${filterMode === 'mono' ? 'filter-tab-btn-active' : ''}`}
-                style={{ flex: 1 }}
-              >
-                二値
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterMode('background_removed')}
-                className={`filter-tab-btn ${filterMode === 'background_removed' ? 'filter-tab-btn-active' : ''}`}
-                style={{ flex: 1 }}
-              >
-                背景除去
-              </button>
-            </div>
-          </div>
-          
-          {/* 行4: 画像の回転 */}
+          {/* 行2: 画像の回転 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
               画像の回転
@@ -454,7 +432,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
             </div>
           </div>
 
-          {/* 行5: 保存形式 */}
+          {/* 行3: 保存形式 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
               保存形式
