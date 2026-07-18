@@ -16,14 +16,7 @@ export function useScanSession() {
   const [currentCorners, setCurrentCorners] = useState<Point[]>([]);
   const [scannedPages, setScannedPages] = useState<string[]>([]);
   const [scannedPageFilterModes, setScannedPageFilterModes] = useState<FilterMode[]>([]);
-  const [currentFilterMode, setCurrentFilterMode] = useState<FilterMode>(() => {
-    try {
-      const saved = localStorage.getItem('docscan_current_filter_mode');
-      return (saved as FilterMode) || 'document_enhanced';
-    } catch {
-      return 'document_enhanced';
-    }
-  });
+  const [currentFilterMode, setCurrentFilterMode] = useState<FilterMode>('document_enhanced');
   const [ocrResults, setOcrResults] = useState<{ [key: number]: OcrResult }>({});
   const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf');
   const [initialIsWarped, setInitialIsWarped] = useState(false);
@@ -45,13 +38,8 @@ export function useScanSession() {
     setCurrentCorners(corners);
     setInitialIsWarped(false); // トリミング調整から開始する
     
-    // 保存されているデフォルトフィルターモードをロードする
-    try {
-      const saved = localStorage.getItem('docscan_current_filter_mode');
-      setCurrentFilterMode((saved as FilterMode) || 'document_enhanced');
-    } catch {
-      setCurrentFilterMode('document_enhanced');
-    }
+    // デフォルトフィルターモードを設定する
+    setCurrentFilterMode('document_enhanced');
     
     setStep('edit');
   };
@@ -67,12 +55,7 @@ export function useScanSession() {
     setCurrentCorners(corners); // ユーザーが調整した座標を履歴保存用に上書き
     setExportMode(enableOcr ? 'pdf' : 'jpeg');
     setCurrentFilterMode(filterMode);
-    
-    try {
-      localStorage.setItem('docscan_current_filter_mode', filterMode);
-    } catch (e) {
-      console.warn("Failed to persist filter mode state:", e);
-    }
+
 
     setScannedPageFilterModes(prev => [...prev, filterMode]);
 
