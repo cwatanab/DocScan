@@ -40,15 +40,14 @@ export function isAISegEngineLoaded(): boolean {
   return docSegSession !== null;
 }
 
-/**
- * 4隅が凸四角形を構成し、かつ内角が極端な角度になっていないかを判定する
- * @param pts 4つの点 (TL, TR, BR, BL)
- * @param maxCos 許容する最大 cosθ値 (絶対値)
- */
-export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
+export function checkShapeValidity(
+  pts: Point[],
+  maxCos: number,
+  maxEdgeRatio: number = 1.3
+): boolean {
   if (pts.length !== 4) return false;
 
-  // 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
+  // 1. 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
   for (let i = 0; i < 4; i++) {
     const pPrev = pts[(i + 3) % 4];
     const pCurr = pts[i];
@@ -69,6 +68,24 @@ export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
     if (Math.abs(cosTheta) > maxCos) {
       return false; // 鋭角・鈍角制限
     }
+  }
+
+  // 2. 対辺の長さ比チェック (極端に歪んだ台形などを弾く)
+  // pts は TL, TR, BR, BL の順に並んでいる前提
+  const dTop = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  const dRight = Math.hypot(pts[1].x - pts[2].x, pts[1].y - pts[2].y);
+  const dBottom = Math.hypot(pts[2].x - pts[3].x, pts[2].y - pts[3].y);
+  const dLeft = Math.hypot(pts[3].x - pts[0].x, pts[3].y - pts[0].y);
+
+  if (dTop === 0 || dBottom === 0 || dLeft === 0 || dRight === 0) {
+    return false;
+  }
+
+  const ratioH = Math.max(dTop, dBottom) / Math.min(dTop, dBottom);
+  const ratioV = Math.max(dLeft, dRight) / Math.min(dLeft, dRight);
+
+  if (ratioH > maxEdgeRatio || ratioV > maxEdgeRatio) {
+    return false;
   }
 
   return true;
@@ -196,7 +213,7 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       { x: x2, y: y2 }, // BR
       { x: x3, y: y3 }  // BL
     ];
-    if (!checkShapeValidity(rawPts, 0.500)) {
+    if (!checkShapeValidity(rawPts, 0.500, 1.4)) {
       return null;
     }
 

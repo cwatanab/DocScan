@@ -241,17 +241,21 @@ export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
       lut = new cv.Mat(1, 256, cv.CV_8UC1);
       const data = new Uint8Array(256);
       
-      let gamma = 1.2;
-      let minVal = 30;
-      let maxVal = 225;
+      let gamma = 1.0;
+      let minVal = 20;
+      let maxVal = 240;
 
       if (meanVal < 130) {
-        gamma = Math.max(1.0, 1.2 - ((130 - meanVal) / 130) * 0.2);
-        minVal = Math.max(10, 30 - Math.round((130 - meanVal) / 10));
-        maxVal = Math.max(180, 225 - Math.round((130 - meanVal) / 3));
+        // 暗い画像の場合：ガンマを 1.0 未満にして中間輝度を持ち上げる（明るくする）
+        gamma = Math.max(0.75, 0.75 + ((meanVal - 40) / 90) * 0.20);
+        minVal = Math.max(10, 20 - Math.round((130 - meanVal) / 10));
+        // 白飛びを防ぐため、maxValは極端に下げず、最低でも230を維持する
+        maxVal = Math.max(230, 240 - Math.round((130 - meanVal) / 10));
       } else {
-        gamma = Math.min(1.4, 1.2 + ((meanVal - 130) / 125) * 0.2);
-        minVal = Math.min(40, 30 + Math.round((meanVal - 130) / 12));
+        // 明るい画像の場合：コントラストを少し高める
+        gamma = Math.min(1.2, 1.0 + ((meanVal - 130) / 125) * 0.2);
+        minVal = Math.min(30, 20 + Math.round((meanVal - 130) / 12));
+        maxVal = 240;
       }
       
       for (let i = 0; i < 256; i++) {
