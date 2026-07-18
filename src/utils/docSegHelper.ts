@@ -62,7 +62,7 @@ export function checkShapeValidity(pts: Point[], maxCos: number): boolean {
 
     const denominator = len1 * len2;
     if (denominator === 0) {
-      return false; // ゼロ除算の回避
+      return false; // ゼロ除算の回避（完全に頂点が重なっている場合）
     }
 
     const cosTheta = (v1.x * v2.x + v1.y * v2.y) / denominator;
@@ -180,20 +180,20 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       (x3 * y0 - y3 * x0)
     );
 
-    // 面積が画面全体の 7% 未満、または 85% を超える場合は誤検出として除外
-    if (area < 0.07 || area > 0.85) {
+    // 面積が画面全体の 10% 未満、または 90% を超える場合は誤検出として除外
+    if (area < 0.10 || area > 0.90) {
       return null;
     }
 
     // (B) 形状の歪みフィルター (三角形化・自己交差の排除)
-    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.900 (約25度) と緩めにチェック
+    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.500 と少し緩めにチェック
     const rawPts = [
       { x: x0, y: y0 }, // TL
       { x: x1, y: y1 }, // TR
       { x: x2, y: y2 }, // BR
       { x: x3, y: y3 }  // BL
     ];
-    if (!checkShapeValidity(rawPts, 0.900)) {
+    if (!checkShapeValidity(rawPts, 0.500)) {
       return null;
     }
 

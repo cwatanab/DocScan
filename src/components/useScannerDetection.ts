@@ -202,9 +202,9 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
     }
 
-    // 最終的にプレビュー描画用として返す平滑化後の座標に対して、厳しめの歪みチェック (0.800 ≒ 37度) を実施
+    // 最終的にプレビュー描画用として返す平滑化後の座標に対して、厳しめの歪みチェック (0.300 ≒ 72度) を実施
     // 内部的な smoothCornersRef の追従（移動）は動かしつつ、画面に歪な形のまま描画されるのだけを防ぎます
-    const resultCorners = smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.800)
+    const resultCorners = smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.300)
       ? smoothCornersRef.current
       : null;
 

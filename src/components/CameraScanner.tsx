@@ -298,6 +298,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           </label>
         </div>
       </div>
+
     </div>
   );
 };
