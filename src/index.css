@@ -1040,21 +1040,21 @@ html, body {
   padding-right: 8px;
 }
 .export-footer {
-  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
   background-color: var(--bg-surface);
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 .btn-primary-large {
   width: 100%;
-  padding: 16px;
+  padding: 11px 16px;
   background-color: var(--primary);
   color: #fff;
   border: none;
-  border-radius: 16px;
-  font-size: 15px;
+  border-radius: 12px;
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -1069,12 +1069,12 @@ html, body {
 }
 .btn-secondary-large {
   width: 100%;
-  padding: 14px;
+  padding: 10px 14px;
   background-color: transparent;
   border: 1px solid var(--border);
   color: var(--text-primary);
-  border-radius: 16px;
-  font-size: 14px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
