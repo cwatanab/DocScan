@@ -343,9 +343,10 @@ export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
       cv.resize(ycrcb, small, new cv.Size(), scale, scale, cv.INTER_LINEAR);
 
       const smallBg = new cv.Mat();
-      lut = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9));
+      // カーネルサイズを 9 から 13 に拡大して、太い文字やグラデーション影を背景から確実に除去
+      lut = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(13, 13));
       cv.dilate(small, smallBg, lut);
-      cv.medianBlur(smallBg, smallBg, 9);
+      cv.medianBlur(smallBg, smallBg, 13);
 
       const bg = new cv.Mat();
       cv.resize(smallBg, bg, ycrcb.size(), 0, 0, cv.INTER_LINEAR);
@@ -358,10 +359,15 @@ export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
       for (let i = 0; i < 3; i++) {
         const chan = channels.get(i);
         const bgChan = bgChannels.get(i);
-        cv.divide(chan, bgChan, chan, 255, -1);
+        // 除算スケールを 255 から 270 に引き上げて、背景の薄いグレーや黄ばみを強制的に完全な白に飛ばす
+        cv.divide(chan, bgChan, chan, 270, -1);
       }
 
       cv.merge(channels, ycrcb);
+
+      // 文字の黒さを引き締め、コントラストを強調する (コントラスト 1.1倍, 明度 -10)
+      ycrcb.convertTo(ycrcb, -1, 1.1, -10);
+
       cv.cvtColor(ycrcb, dst, cv.COLOR_RGB2RGBA);
 
       small.delete();
