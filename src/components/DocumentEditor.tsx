@@ -29,7 +29,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [cvError, setCvError] = useState<string | null>(null);
   
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilterMode || 'document_enhanced');
-  const [detectedColorRatio, setDetectedColorRatio] = useState<number | null>(null);
 
   // カラーモードと補正モードの派生状態
   const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original') ? 'color' : 'document';
@@ -139,9 +138,8 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
     if (autoDetectFilter) {
       // Avoid iOS canvas sync error by warping directly from original image to a 150x150 matrix
-      const { mode, colorRatio } = await detectOptimalFilter(imageSrc, corners);
+      const { mode } = await detectOptimalFilter(imageSrc, corners);
       targetFilterMode = mode;
-      setDetectedColorRatio(colorRatio); // カラー比率を保存
       setFilterMode(targetFilterMode); // UIの選択状態を更新
     }
     
@@ -354,11 +352,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       {/* 下部コントロールエリア (フィルタ適用モードの時のみフッターパネルを表示) */}
       {isWarped && (
         <div className="editor-footer" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {detectedColorRatio !== null && (
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right', paddingRight: '8px', marginBottom: '-4px' }}>
-              自動カラー判定比率: {(detectedColorRatio * 100).toFixed(2)}% (カラー閾値: 0.50%)
-            </div>
-          )}
           {/* 行1: カラーモード選択 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">
