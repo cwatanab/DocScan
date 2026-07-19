@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
-import { loadOpenCV, warpImage, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
+import { loadOpenCV, detectOptimalFilter, processWarpAndFilter } from '../utils/opencvHelper';
 import type { Point, FilterMode } from '../utils/opencvHelper';
 import { useCropHandles } from './useCropHandles';
 import { OpenCvInitializer } from './OpenCvInitializer';
@@ -29,21 +29,22 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [cvError, setCvError] = useState<string | null>(null);
   
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilterMode || 'document_enhanced');
+  const [detectedColorRatio, setDetectedColorRatio] = useState<number | null>(null);
 
   // カラーモードと補正モードの派生状態
-  const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original' || filterMode === 'background_removed') ? 'color' : 'document';
-  const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced' || filterMode === 'background_removed') ? 'enhanced' : 'original';
+  const colorMode: 'color' | 'document' = (filterMode === 'color_enhanced' || filterMode === 'color_original') ? 'color' : 'document';
+  const enhancementMode: 'enhanced' | 'original' = (filterMode === 'color_enhanced' || filterMode === 'document_enhanced') ? 'enhanced' : 'original';
 
   const handleSetColorMode = (newColorMode: 'color' | 'document') => {
     const newMode: FilterMode = newColorMode === 'color'
-      ? (enhancementMode === 'enhanced' ? 'background_removed' : 'color_original')
+      ? (enhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
       : (enhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
     setFilterMode(newMode);
   };
 
   const handleSetEnhancementMode = (newEnhancementMode: 'enhanced' | 'original') => {
     const newMode: FilterMode = colorMode === 'color'
-      ? (newEnhancementMode === 'enhanced' ? 'background_removed' : 'color_original')
+      ? (newEnhancementMode === 'enhanced' ? 'color_enhanced' : 'color_original')
       : (newEnhancementMode === 'enhanced' ? 'document_enhanced' : 'document_original');
     setFilterMode(newMode);
   };
@@ -130,19 +131,17 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   }, []);
 
   // 台形補正のプレビュー実行
-  const handleWarpPreview = useCallback((autoDetectFilter: boolean = false, targetRotation: number = rotation) => {
+  const handleWarpPreview = useCallback(async (autoDetectFilter: boolean = false, targetRotation: number = rotation) => {
     if (!cvReady) return;
     if (corners.length !== 4 || !imageRef.current) return;
 
     let targetFilterMode = filterMode;
 
     if (autoDetectFilter) {
-      // 一時的な台形補正を行い、最適なフィルターモードを自動判定する (warpImageは直接ImageElementを受け取れるため、一時Canvasへのコピーを回避しメモリ消費を抑えます)
-      const warpedCanvas = warpImage(imageRef.current, corners);
-      targetFilterMode = detectOptimalFilter(warpedCanvas);
-      if (targetFilterMode === 'color_enhanced') {
-        targetFilterMode = 'background_removed';
-      }
+      // Avoid iOS canvas sync error by warping directly from original image to a 150x150 matrix
+      const { mode, colorRatio } = await detectOptimalFilter(imageSrc, corners);
+      targetFilterMode = mode;
+      setDetectedColorRatio(colorRatio); // カラー比率を保存
       setFilterMode(targetFilterMode); // UIの選択状態を更新
     }
     
@@ -355,6 +354,11 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
       {/* 下部コントロールエリア (フィルタ適用モードの時のみフッターパネルを表示) */}
       {isWarped && (
         <div className="editor-footer" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {detectedColorRatio !== null && (
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right', paddingRight: '8px', marginBottom: '-4px' }}>
+              自動カラー判定比率: {(detectedColorRatio * 100).toFixed(2)}% (カラー閾値: 0.50%)
+            </div>
+          )}
           {/* 行1: カラーモード選択 */}
           <div className="filter-tabs-container">
             <span className="filter-tabs-label">

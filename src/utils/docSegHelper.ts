@@ -287,9 +287,6 @@ export function getDefaultCorners(w: number, h: number): Point[] {
   ];
 }
 
-/**
- * AIによる境界検出を試み、検出できなかった場合はデフォルトの境界を返す
- */
 export async function detectDocumentWithFallback(
   srcCanvas: HTMLCanvasElement,
   aiModelLoaded: boolean
@@ -297,6 +294,11 @@ export async function detectDocumentWithFallback(
   let corners: Point[] | null = null;
   if (aiModelLoaded) {
     corners = await detectDocumentAI(srcCanvas);
+
+    // AIの検出座標に対しても厳しめの形状妥当性チェックを行う
+    if (corners && !checkShapeValidity(corners, 0.240, 1.25)) {
+      corners = null;
+    }
   }
   if (!corners) {
     corners = getDefaultCorners(srcCanvas.width, srcCanvas.height);

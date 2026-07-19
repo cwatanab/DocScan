@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Download, Share2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Download, Share2, Copy } from 'lucide-react';
 import type { OcrResult } from '../utils/ocrHelper';
 import { createSearchablePdf } from '../utils/pdfHelper';
+import { createReproducedHtml } from '../utils/htmlHelper';
 import { ZoomableImage } from './ZoomableImage';
 import { ThumbnailGrid } from './ThumbnailGrid';
 import {
@@ -37,6 +38,16 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   
   // 拡大プレビュー用のステート
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 再現HTML文字列の事前生成 (プレビューおよびエクスポートで共有)
+  const htmlContent = useMemo(() => {
+    const htmlData = pages.map((_, index) => ({
+      ocrResult: ocrResults[index]
+    }));
+    return createReproducedHtml(htmlData);
+  }, [pages, ocrResults]);
+
+
 
   // マウント時にPDFモードであれば、バックグラウンドで自動的にPDF生成を開始する (OCRはすでに完了済み)
   useEffect(() => {
@@ -118,6 +129,41 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     if (!blob) return;
     triggerBlobDownload(blob, `DocScan_${getFormattedTimestamp()}.pdf`);
   }, [ensurePdfGenerated]);
+
+  // HTMLダウンロード (Approach B: テキスト再現HTML)
+  const handleDownloadHtml = useCallback(() => {
+    try {
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+      triggerBlobDownload(blob, `DocScan_${getFormattedTimestamp()}.html`);
+    } catch (err) {
+      console.error('HTML generation failed:', err);
+      alert('HTMLファイルの生成に失敗しました。');
+    }
+  }, [htmlContent]);
+
+  // HTML共有 (Web Share API)
+  const handleShareHtml = useCallback(() => {
+    try {
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+      const fileName = `DocScan_${getFormattedTimestamp()}.html`;
+      const file = new File([blob], fileName, { type: 'text/html' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+          files: [file],
+        }).catch(err => {
+          if (err.name !== 'AbortError') {
+            console.error('HTML share failed:', err);
+          }
+        });
+      } else {
+        triggerBlobDownload(blob, fileName);
+      }
+    } catch (err) {
+      console.error('HTML share failed:', err);
+      alert('HTMLファイルの共有に失敗しました。');
+    }
+  }, [htmlContent]);
 
   // JPEG(画像)として保存
   const handleDownloadJpeg = useCallback(async (imageSrc: string, index: number, timestamp?: string) => {
@@ -285,23 +331,39 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
             />
           </div>
         ) : (
-          /* OCR テキスト表示 */
-          <div className="ocr-text-box">
-            <div className="ocr-box-header">
-              <span className="ocr-box-label">
-                認識された文字情報
-              </span>
-              <button
-                onClick={handleCopyText}
-                className="ocr-box-copy-btn"
-              >
-                コピーする
-              </button>
+          /* OCR テキスト表示（再現HTMLプレビュー） */
+          <div className="ocr-text-box" style={{ flex: 1, minHeight: '350px', maxWidth: 'none' }}>
+            <div className="ocr-box-header" style={{ justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={handleCopyText}
+                  className="ocr-box-copy-btn"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Copy style={{ width: '13px', height: '13px' }} />
+                  テキストコピー
+                </button>
+              </div>
             </div>
             
-            <div className="ocr-box-content">
-              {Object.values(ocrResults).map(res => res.text).join('\n\n--- ページ区切り ---\n\n') || (
-                <span style={{ color: '#64748b', fontStyle: 'italic' }}>文字は検出されませんでした</span>
+            <div className="ocr-box-content" style={{ flex: 1, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', maxHeight: 'none' }}>
+              {Object.values(ocrResults).length > 0 ? (
+                <iframe
+                  srcDoc={htmlContent}
+                  title="HTML Preview"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    backgroundColor: '#ffffff',
+                    flex: 1
+                  }}
+                />
+              ) : (
+                <div style={{ padding: '16px', color: '#64748b', fontStyle: 'italic' }}>
+                  文字は検出されませんでした
+                </div>
               )}
             </div>
           </div>
@@ -360,6 +422,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
                 <Share2 style={{ width: '18px', height: '18px' }} />
                 PDFを共有
               </button>
+              <button
+                onClick={handleShareHtml}
+                className="btn-primary-large btn-flex-1 btn-indigo"
+              >
+                <Share2 style={{ width: '18px', height: '18px' }} />
+                HTMLを共有
+              </button>
             </div>
 
             <div className="export-button-row">
@@ -369,6 +438,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
               >
                 <Download style={{ width: '16px', height: '16px' }} />
                 PDF保存
+              </button>
+              <button
+                onClick={handleDownloadHtml}
+                className="btn-secondary-large btn-flex-1 btn-slate-dark"
+              >
+                <Download style={{ width: '16px', height: '16px' }} />
+                HTML保存
               </button>
             </div>
           </>

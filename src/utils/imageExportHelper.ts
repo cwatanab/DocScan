@@ -304,19 +304,20 @@ export const shareAllPages = async (
 export const clearAppCacheAndReload = async (): Promise<void> => {
   try {
     // 1. キャッシュストレージの全消去
+    // ※ 古いキャッシュデータはこれだけで完全にクリアされ、次回リロード時にサーバーから最新のコードがフェッチされます。
     if (window.caches) {
       const keys = await caches.keys();
       for (const key of keys) {
         await caches.delete(key);
       }
     }
-    // 2. Service Worker の全解除
-    if (navigator.serviceWorker) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      for (const registration of registrations) {
-        await registration.unregister();
-      }
-    }
+    
+    // ※ Service Workerのスレッド自体を強制削除 (unregister) すると、リロード直後のブラウザの
+    // ネットワークスタックが不安定になり、WebAssembly (.wasm) や ONNXモデルファイルのダウンロードが
+    // 未完了のままフリーズする原因（iOS Safari等で顕著）となるため、Service Workerの登録解除は行いません。
+
+    // ブラウザのファイルロック解除とデータベース同期の完了を 300ms 待ちます
+    await new Promise(resolve => setTimeout(resolve, 300));
   } catch (e) {
     console.error("Error clearing app cache:", e);
   } finally {

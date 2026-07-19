@@ -168,8 +168,14 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
     }
 
-    // 3. ピントの計測と高解像度フレームのキャッシュ蓄積
-    if (smoothCornersRef.current && (now - lastFocusScoreTimeRef.current > FOCUS_BUFFER_INTERVAL)) {
+    // 2.5. 最終的なプレビュー描画用として返す平滑化後の座標に対して、厳しめの歪みチェック (0.240 ≒ 76度、比率 1.25) を実施
+    // 内部的な smoothCornersRef の追従（移動）は動かしつつ、画面に歪な形のまま描画されるのだけを防ぎます
+    const resultCorners = smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.240, 1.25)
+      ? smoothCornersRef.current
+      : null;
+
+    // 3. ピントの計測と高解像度フレームのキャッシュ蓄積 (適正な形状と判定されたフレームのみキャッシュする)
+    if (resultCorners && (now - lastFocusScoreTimeRef.current > FOCUS_BUFFER_INTERVAL)) {
       try {
         if (!smallCanvasRef.current) {
           smallCanvasRef.current = document.createElement('canvas');
@@ -189,7 +195,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
 
         const scaleX = tempCanvas.width / canvas.width;
         const scaleY = tempCanvas.height / canvas.height;
-        const scaledCorners = smoothCornersRef.current.map(pt => ({
+        const scaledCorners = resultCorners.map(pt => ({
           x: pt.x * scaleX,
           y: pt.y * scaleY
         }));
@@ -213,12 +219,6 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
         console.error("Error buffering frame: ", e);
       }
     }
-
-    // 最終的にプレビュー描画用として返す平滑化後の座標に対して、厳しめの歪みチェック (0.240 ≒ 76度、比率 1.25) を実施
-    // 内部的な smoothCornersRef の追従（移動）は動かしつつ、画面に歪な形のまま描画されるのだけを防ぎます
-    const resultCorners = smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.240, 1.25)
-      ? smoothCornersRef.current
-      : null;
 
     return resultCorners;
   }, [aiModelLoaded]);

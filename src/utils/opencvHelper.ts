@@ -191,140 +191,127 @@ export function warpImage(srcImgOrCanvas: HTMLCanvasElement | HTMLImageElement, 
  * @param dst 出力 cv.Mat (RGBA または GRAY)
  * @param mode フィルターモード
  */
-export type FilterMode = 'color_enhanced' | 'color_original' | 'document_enhanced' | 'document_original' | 'mono' | 'background_removed';
+export type FilterMode = 'color_enhanced' | 'color_original' | 'document_enhanced' | 'document_original' | 'mono';
 
 export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
   const cv = window.cv;
   if (!cv) return;
 
-  let grayForStats: any = null;
-  let meanMat: any = null;
-  let stddevMat: any = null;
-  let ycrcb: any = null;
   let channels: any = null;
-  let yChan: any = null;
-  let crChan: any = null;
-  let cbChan: any = null;
   let lut: any = null;
   let rgb: any = null;
 
   try {
-    // --- 自動補正のための画像解析 (平均輝度の算出) ---
-    let meanVal = 128;
-    try {
-      grayForStats = new cv.Mat();
-      cv.cvtColor(src, grayForStats, cv.COLOR_RGBA2GRAY);
-      meanMat = new cv.Mat();
-      stddevMat = new cv.Mat();
-      cv.meanStdDev(grayForStats, meanMat, stddevMat);
-      meanVal = meanMat.doubleAt(0, 0);
-    } catch (e) {
-      console.warn("Failed to calculate image stats for auto filter:", e);
-    } finally {
-      if (grayForStats) { grayForStats.delete(); grayForStats = null; }
-      if (meanMat) { meanMat.delete(); meanMat = null; }
-      if (stddevMat) { stddevMat.delete(); stddevMat = null; }
-    }
 
     if (mode === 'color_enhanced') {
-      ycrcb = new cv.Mat();
-      cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
-      cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
+      let hsv: any = null;
+      let mask: any = null;
+      try {
+        hsv = new cv.Mat();
+        cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
 
-      channels = new cv.MatVector();
-      cv.split(ycrcb, channels);
-      
-      yChan = channels.get(0);  // Y (輝度)
-      crChan = channels.get(1); // Cr (色度)
-      cbChan = channels.get(2); // Cb (色度)
-      
-      lut = new cv.Mat(1, 256, cv.CV_8UC1);
-      const data = new Uint8Array(256);
-      
-      let gamma = 1.0;
-      let minVal = 20;
-      let maxVal = 240;
+        channels = new cv.MatVector();
+        cv.split(hsv, channels);
 
-      if (meanVal < 130) {
-        // 暗い画像の場合：ガンマを 1.0 未満にして中間輝度を持ち上げる（明るくする）
-        gamma = Math.max(0.75, 0.75 + ((meanVal - 40) / 90) * 0.20);
-        minVal = Math.max(10, 20 - Math.round((130 - meanVal) / 10));
-        // 白飛びを防ぐため、maxValは極端に下げず、最低でも230を維持する
-        maxVal = Math.max(230, 240 - Math.round((130 - meanVal) / 10));
-      } else {
-        // 明るい画像の場合：コントラストを少し高める
-        gamma = Math.min(1.2, 1.0 + ((meanVal - 130) / 125) * 0.2);
-        minVal = Math.min(30, 20 + Math.round((meanVal - 130) / 12));
-        maxVal = 240;
+        const sChan = channels.get(1); // 彩度チャネル
+        const vChan = channels.get(2); // 明度・輝度チャネル
+
+        // 1. 輝度の自動補正: 0-255 の Min-Max ストレッチ
+        // 自動的に最も明るい部分を白、最も暗い部分を黒に引き伸ばします
+        mask = new cv.Mat();
+        cv.normalize(vChan, vChan, 0, 255, cv.NORM_MINMAX, -1, mask);
+
+        // 2. 彩度の自動補正: 彩度を 1.25倍 に引き上げて鮮やかさを復元 (赤ペン・蛍光ペン・捺印などを強調)
+        sChan.convertTo(sChan, -1, 1.25, 0);
+
+        cv.merge(channels, hsv);
+        rgb = new cv.Mat();
+        cv.cvtColor(hsv, rgb, cv.COLOR_HSV2RGB);
+        cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
+        
+        rgb.delete(); rgb = null;
+      } catch (err) {
+        console.error("Error in color_enhanced filter:", err);
+        src.copyTo(dst);
+      } finally {
+        if (hsv) { try { hsv.delete(); } catch(e){} }
+        if (mask) { try { mask.delete(); } catch(e){} }
       }
-      
-      for (let i = 0; i < 256; i++) {
-        let val = i;
-        if (val <= minVal) {
-          val = 0;
-        } else if (val >= maxVal) {
-          val = 255;
-        } else {
-          val = ((val - minVal) / (maxVal - minVal)) * 255;
-        }
-        const corrected = Math.pow(val / 255.0, gamma) * 255.0;
-        data[i] = Math.min(255, Math.max(0, corrected));
-      }
-      lut.data.set(data);
 
-      cv.LUT(yChan, lut, yChan);
-      
-      lut.delete(); lut = null;
-
-      cv.merge(channels, ycrcb);
-      rgb = new cv.Mat();
-      cv.cvtColor(ycrcb, rgb, cv.COLOR_YCrCb2RGB);
-      cv.cvtColor(rgb, dst, cv.COLOR_RGB2RGBA);
-      rgb.delete(); rgb = null;
-
-      yChan.delete(); yChan = null;
-      crChan.delete(); crChan = null;
-      cbChan.delete(); cbChan = null;
-      channels.delete(); channels = null;
-      ycrcb.delete(); ycrcb = null;
     } else if (mode === 'color_original') {
       src.copyTo(dst);
     } else if (mode === 'document_enhanced') {
-      cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-      
-      lut = new cv.Mat(1, 256, cv.CV_8UC1);
-      const data = new Uint8Array(256);
-      
-      let gamma = 1.2;
-      let minVal = 30;
-      let maxVal = 225;
+      let small: any = null;
+      let smallBg: any = null;
+      let bg: any = null;
+      let mask: any = null;
+      try {
+        // 1. グレースケールに変換
+        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
 
-      if (meanVal < 110) {
-        gamma = 1.1;
-        minVal = 20;
-        maxVal = 215;
-      } else if (meanVal > 200) {
-        gamma = 1.4;
-        minVal = 40;
-        maxVal = 235;
-      }
-      
-      for (let i = 0; i < 256; i++) {
-        let val = i;
-        if (val <= minVal) {
-          val = 0;
-        } else if (val >= maxVal) {
-          val = 255;
-        } else {
-          val = ((val - minVal) / (maxVal - minVal)) * 255;
+        // 2. 適応的背景推定 (モルフォロジー演算による文字の消去と影・しわの抽出)
+        // メモリと速度向上のため、1/4 サイズに縮小して処理します
+        // ※ new cv.Size(0, 0) による OpenCV.js のリサイズクラッシュを防ぐため、サイズを明示的に指定します
+        small = new cv.Mat();
+        smallBg = new cv.Mat();
+        bg = new cv.Mat();
+        const scale = 0.25;
+        const smallW = Math.round(dst.cols * scale);
+        const smallH = Math.round(dst.rows * scale);
+
+        cv.resize(dst, small, new cv.Size(smallW, smallH), 0, 0, cv.INTER_LINEAR);
+
+        // 膨張処理 (Dilation) のカーネルサイズを 13x13 に戻し、折じわや影を背景画像に残して除算で消去できるようにします
+        lut = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(13, 13));
+        cv.dilate(small, smallBg, lut);
+        // メディアンフィルタで背景陰影を滑らかにします (サイズ 13)
+        cv.medianBlur(smallBg, smallBg, 13);
+
+        // 元のサイズに拡大します
+        cv.resize(smallBg, bg, dst.size(), 0, 0, cv.INTER_LINEAR);
+
+        // 3. 元のグレースケール画像を背景画像で除算して、影やうねり（しわ）を完璧に相殺します
+        cv.divide(dst, bg, dst, 255, -1);
+
+        // 4. 背景除去後の画像を 0-255 の範囲に Min-Max ストレッチ（正規化）
+        // ※ OpenCV.jsの引数例外を防ぐため、明示的に空のマスクを渡します
+        mask = new cv.Mat();
+        const minMax = cv.minMaxLoc(dst, mask);
+        const minVal = minMax.minVal;
+        const maxVal = minMax.maxVal;
+
+        if (maxVal > minVal) {
+          const scaleFactor = 255.0 / (maxVal - minVal);
+          dst.convertTo(dst, -1, scaleFactor, -minVal * scaleFactor);
         }
-        const corrected = Math.pow(val / 255.0, gamma) * 255.0;
-        data[i] = Math.min(255, Math.max(0, corrected));
-      }
-      lut.data.set(data);
-      cv.LUT(dst, lut, dst);
 
-      lut.delete(); lut = null;
+        // 5. ハイライトクリップ付きガンマ補正 (gamma = 2.2, clip = 220)
+        // 除算で消しきれなかったわずかなしわの影（明るいグレー）がガンマ補正で引き締められて浮き出るのを防ぐため、
+        // 輝度 220 以上を完全な白 (255) に強制クリップし、それ未満の文字領域だけをガンマ補正で太く濃く引き締めます
+        lut = new cv.Mat(1, 256, cv.CV_8UC1);
+        const lutData = new Uint8Array(256);
+        const gamma = 2.2;
+        const clipThreshold = 220;
+        for (let i = 0; i < 256; i++) {
+          if (i >= clipThreshold) {
+            lutData[i] = 255;
+          } else {
+            const norm = i / clipThreshold;
+            lutData[i] = Math.min(255, Math.max(0, Math.pow(norm, gamma) * 255.0));
+          }
+        }
+        lut.data.set(lutData);
+        cv.LUT(dst, lut, dst);
+      } catch (err) {
+        console.error("Error in document_enhanced filter (Morphology):", err);
+      } finally {
+        if (small) { try { small.delete(); } catch(e){} }
+        if (smallBg) { try { smallBg.delete(); } catch(e){} }
+        if (bg) { try { bg.delete(); } catch(e){} }
+        if (mask) { try { mask.delete(); } catch(e){} }
+        if (lut) { try { lut.delete(); } catch(e){} lut = null; }
+      }
     } else if (mode === 'document_original') {
       cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
     } else if (mode === 'mono') {
@@ -338,59 +325,8 @@ export function applyFilterToMat(src: any, dst: any, mode: FilterMode): void {
         15,
         10
       );
-    } else if (mode === 'background_removed') {
-      ycrcb = new cv.Mat();
-      cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
-
-      const small = new cv.Mat();
-      const scale = 0.25;
-      cv.resize(ycrcb, small, new cv.Size(), scale, scale, cv.INTER_LINEAR);
-
-      const smallBg = new cv.Mat();
-      // カーネルサイズを 9 から 13 に拡大して、太い文字やグラデーション影を背景から確実に除去
-      lut = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(13, 13));
-      cv.dilate(small, smallBg, lut);
-      cv.medianBlur(smallBg, smallBg, 13);
-
-      const bg = new cv.Mat();
-      cv.resize(smallBg, bg, ycrcb.size(), 0, 0, cv.INTER_LINEAR);
-
-      channels = new cv.MatVector();
-      const bgChannels = new cv.MatVector();
-      cv.split(ycrcb, channels);
-      cv.split(bg, bgChannels);
-
-      for (let i = 0; i < 3; i++) {
-        const chan = channels.get(i);
-        const bgChan = bgChannels.get(i);
-        // 除算スケールを 255 から 270 に引き上げて、背景の薄いグレーや黄ばみを強制的に完全な白に飛ばす
-        cv.divide(chan, bgChan, chan, 270, -1);
-      }
-
-      cv.merge(channels, ycrcb);
-
-      // 文字の黒さを引き締め、コントラストを強調する (コントラスト 1.1倍, 明度 -10)
-      ycrcb.convertTo(ycrcb, -1, 1.1, -10);
-
-      cv.cvtColor(ycrcb, dst, cv.COLOR_RGB2RGBA);
-
-      small.delete();
-      smallBg.delete();
-      bg.delete();
-      for (let i = 0; i < bgChannels.size(); i++) {
-        const m = bgChannels.get(i);
-        if (m) m.delete();
-      }
-      bgChannels.delete();
     }
   } finally {
-    if (grayForStats) { try { grayForStats.delete(); } catch(e){} }
-    if (meanMat) { try { meanMat.delete(); } catch(e){} }
-    if (stddevMat) { try { stddevMat.delete(); } catch(e){} }
-    if (ycrcb) { try { ycrcb.delete(); } catch(e){} }
-    if (yChan) { try { yChan.delete(); } catch(e){} }
-    if (crChan) { try { crChan.delete(); } catch(e){} }
-    if (cbChan) { try { cbChan.delete(); } catch(e){} }
     if (channels) {
       try {
         for (let i = 0; i < channels.size(); i++) {
@@ -531,22 +467,61 @@ export function calculateFocusScore(canvas: HTMLCanvasElement): number {
  * @param canvas 解析対象の補正後画像Canvas
  * @returns 'original' | 'document'
  */
-export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color_enhanced' | 'document_enhanced' {
+export async function detectOptimalFilter(
+  imageSrc: string,
+  corners: { x: number; y: number }[]
+): Promise<{ mode: 'color_enhanced' | 'document_enhanced'; colorRatio: number }> {
   const cv = window.cv;
-  if (!cv || !cv.Mat) {
-    return 'document_enhanced'; // フォールバック
+  let colorRatio = 0.0;
+  if (!cv || !cv.Mat || corners.length !== 4) {
+    return { mode: 'document_enhanced', colorRatio: 0.0 };
   }
 
   let src: any = null;
+  let small: any = null;
   let hsv: any = null;
   let channels: any = null;
+  let threshSat: any = null;
+  let srcCoords: any = null;
+  let dstCoords: any = null;
+  let M: any = null;
+  let tempImg: HTMLImageElement | null = null;
   
   try {
-    src = cv.imread(canvas);
+    // Use a newly loaded image to guarantee complete decoding and avoid iOS canvas sync errors
+    tempImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (err) => reject(err);
+      img.src = imageSrc;
+    });
+
+    src = cv.imread(tempImg);
+    small = new cv.Mat();
+    const sorted = sortPoints(corners);
+    const [tl, tr, br, bl] = sorted;
+
+    srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      tl.x, tl.y,
+      tr.x, tr.y,
+      br.x, br.y,
+      bl.x, bl.y
+    ]);
+
+    dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      150, 0,
+      150, 150,
+      0, 150
+    ]);
+
+    M = cv.getPerspectiveTransform(srcCoords, dstCoords);
+    cv.warpPerspective(src, small, M, new cv.Size(150, 150), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
     hsv = new cv.Mat();
 
-    // 1. カラーかどうかの判定 (HSVに変換し、Sチャンネルの平均値を見る)
-    cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+    // 1. カラーかどうかの判定 (HSVに変換し、Sチャンネルの閾値比率を見る)
+    cv.cvtColor(small, hsv, cv.COLOR_RGBA2RGB);
     cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
     
     // HSVの各チャンネルを分離
@@ -554,15 +529,25 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color_enhanced'
     cv.split(hsv, channels);
     
     let sChan = channels.get(1); // S（彩度）チャンネルを取得
-    let meanSat = cv.mean(sChan)[0]; // 彩度の平均値 (0-255)
     
-    // 彩度の平均値が 15 以上なら「カラー画像」とみなす
-    if (meanSat > 15) {
-      return 'color_enhanced';
+    // 有彩色と判定する彩度閾値を 35 から 20 に下げ、暗い撮影環境のカラー情報も確実に拾います (薄い紙の黄ばみは 0 に足切り)
+    threshSat = new cv.Mat();
+    cv.threshold(sChan, threshSat, 12, 255, cv.THRESH_BINARY);
+    
+    // 有彩色ピクセルの平均値（全体の何割が有彩色ピクセルかを示す値, 0-255）
+    const meanVal = cv.mean(threshSat)[0];
+    colorRatio = meanVal / 255.0; // 0.0 ~ 1.0 の割合
+    
+    console.log(`[detectOptimalFilter] Safe Ratio: ${colorRatio.toFixed(5)} (threshold: 0.005)`);
+
+    // 有彩色領域が全体の 0.3% 以上存在すれば「カラー画像」と判定 (より小さな印鑑や数行の赤字に対応)
+    if (colorRatio > 0.005) {
+      return { mode: 'color_enhanced', colorRatio };
     }
   } catch (e) {
     console.error("Error in detecting optimal filter: ", e);
   } finally {
+    if (threshSat) { try { threshSat.delete(); } catch(e){} }
     if (channels) {
       try {
         for (let i = 0; i < channels.size(); i++) {
@@ -572,10 +557,14 @@ export function detectOptimalFilter(canvas: HTMLCanvasElement): 'color_enhanced'
       } catch(err){}
     }
     if (hsv) { try { hsv.delete(); } catch(e){} }
+    if (small) { try { small.delete(); } catch(e){} }
     if (src) { try { src.delete(); } catch(e){} }
+    if (srcCoords) { try { srcCoords.delete(); } catch(e){} }
+    if (dstCoords) { try { dstCoords.delete(); } catch(e){} }
+    if (M) { try { M.delete(); } catch(e){} }
   }
 
-  return 'document_enhanced';
+  return { mode: 'document_enhanced', colorRatio };
 }
 
 /**
