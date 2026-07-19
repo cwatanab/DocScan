@@ -537,8 +537,6 @@ export async function detectOptimalFilter(
     // 有彩色ピクセルの平均値（全体の何割が有彩色ピクセルかを示す値, 0-255）
     const meanVal = cv.mean(threshSat)[0];
     colorRatio = meanVal / 255.0; // 0.0 ~ 1.0 の割合
-    
-    console.log(`[detectOptimalFilter] Safe Ratio: ${colorRatio.toFixed(5)} (threshold: 0.005)`);
 
     // 有彩色領域が全体の 0.3% 以上存在すれば「カラー画像」と判定 (より小さな印鑑や数行の赤字に対応)
     if (colorRatio > 0.005) {
