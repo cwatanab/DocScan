@@ -5,6 +5,10 @@ import { detectDocumentWithFallback, getDefaultCorners } from '../utils/docSegHe
 import { useCameraStream } from './useCameraStream';
 import { resizeCanvas, clearAppCacheAndReload, isLocalExecution } from '../utils/imageExportHelper';
 import { useScannerDetection } from './useScannerDetection';
+import {
+  getCaptureQualityGuidance,
+  QUALITY_FRAME_COLORS
+} from '../utils/opencvHelper';
 
 interface CameraScannerProps {
   onCapture: (imageSrc: string, initialCorners: Point[]) => void;
@@ -29,13 +33,27 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     animationFrameRef
   } = useCameraStream({ videoRef, enabled: !isSleeping });
 
-  // AI 境界検出とキャッシュバッファのカスタムフック呼び出し
+  // AI 境界検出・画質評価・キャッシュバッファ
   const {
     aiModelLoaded,
+    frameQuality,
     processDetectionFrame,
     getBestCachedFrame,
     resetDetection
   } = useScannerDetection({ cameraActive });
+
+  const qualityLevelForFrame =
+    frameQuality.level === 'none' ? 'good' : frameQuality.level;
+  const frameColors = QUALITY_FRAME_COLORS[qualityLevelForFrame];
+  const guidanceText = getCaptureQualityGuidance(frameQuality.level, frameQuality.reasons);
+  const guidanceToneClass =
+    frameQuality.level === 'poor'
+      ? 'scanner-guidance-poor'
+      : frameQuality.level === 'fair'
+        ? 'scanner-guidance-fair'
+        : frameQuality.level === 'good'
+          ? 'scanner-guidance-good'
+          : 'scanner-guidance-none';
 
   // カメラ停止とキャッシュバッファのクリア
   const stopCamera = () => {
@@ -63,6 +81,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
     };
   }, []);
 
+  // 枠色は React state 経由で最新値を ref に載せ、rAF ループから参照する
+  const frameColorsRef = useRef(frameColors);
+  frameColorsRef.current = frameColors;
+
   // リアルタイム輪郭検出ループ
   useEffect(() => {
     if (!cameraActive || !videoRef.current || !canvasRef.current) return;
@@ -84,21 +106,21 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           canvas.height = video.videoHeight;
         }
 
-        if (overlayCanvas && (overlayCanvas.width !== video.videoWidth || overlayCanvas.height !== video.videoHeight)) {
+        if (
+          overlayCanvas &&
+          (overlayCanvas.width !== video.videoWidth || overlayCanvas.height !== video.videoHeight)
+        ) {
           overlayCanvas.width = video.videoWidth;
           overlayCanvas.height = video.videoHeight;
         }
 
         if (ctx) {
-          // 生のカメラ映像を描画する
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          // カスタムフックを呼び出して AI検出とフレーム蓄積を行う
           smoothCorners = await processDetectionFrame(canvas);
 
           if (smoothCorners) {
-            lastActiveTimeRef.current = Date.now(); // 検出されている間は無操作タイマーをリセット
+            lastActiveTimeRef.current = Date.now();
           } else {
-            // 未検出の時間をチェック
             const inactiveDuration = Date.now() - lastActiveTimeRef.current;
             if (inactiveDuration > SLEEP_TIMEOUT) {
               setIsSleeping(true);
@@ -106,15 +128,16 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           }
         }
 
-        // 緑の枠線は透過オーバーレイCanvasにのみ描画する
+        // 画質に応じた色の枠線（透過オーバーレイ）
         if (oCtx && overlayCanvas) {
           oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
           if (smoothCorners) {
-            oCtx.strokeStyle = '#10b981';
+            const colors = frameColorsRef.current;
+            oCtx.strokeStyle = colors.stroke;
             oCtx.lineWidth = 6;
-            oCtx.fillStyle = 'rgba(16, 185, 129, 0.15)';
-            
+            oCtx.fillStyle = colors.fill;
+
             oCtx.beginPath();
             oCtx.moveTo(smoothCorners[0].x, smoothCorners[0].y);
             oCtx.lineTo(smoothCorners[1].x, smoothCorners[1].y);
@@ -125,11 +148,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
             oCtx.fill();
 
             oCtx.fillStyle = '#ffffff';
-            smoothCorners.forEach(pt => {
+            smoothCorners.forEach((pt) => {
               oCtx.beginPath();
               oCtx.arc(pt.x, pt.y, 12, 0, 2 * Math.PI);
               oCtx.fill();
-              oCtx.strokeStyle = '#059669';
+              oCtx.strokeStyle = colors.corner;
               oCtx.lineWidth = 3;
               oCtx.stroke();
             });
@@ -270,7 +293,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
               </div>
               <div className="scanner-header-content">
                 <h1 className="scanner-title">DocScan <span style={{ fontSize: '0.55em', opacity: 0.6, marginLeft: '6px', fontWeight: 'normal', verticalAlign: 'middle', WebkitTextFillColor: '#ffffff', WebkitBackgroundClip: 'unset', background: 'none' }}>v0.1</span></h1>
-                <p className="scanner-guidance-text">書類全体が写るようにしてください</p>
+                <p className={`scanner-guidance-text ${guidanceToneClass}`}>{guidanceText}</p>
               </div>
             </div>
           </>
@@ -309,7 +332,13 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         <button
           onClick={handleShutter}
           disabled={!cameraActive}
-          className="scanner-shutter-btn"
+          className={`scanner-shutter-btn scanner-shutter-${qualityLevelForFrame}`}
+          style={
+            frameQuality.level !== 'none'
+              ? { borderColor: frameColors.stroke }
+              : undefined
+          }
+          title={guidanceText}
         >
           <div className="scanner-shutter-inner" />
         </button>

@@ -13,3 +13,18 @@ export { loadOpenCV, isOpenCvReady } from './opencv/load';
 export { applyFilterToMat, applyFilter, detectOptimalFilter } from './opencv/filters';
 export { warpImage, rotateImage90, processWarpAndFilter } from './opencv/warp';
 export { calculateFocusScore } from './opencv/focus';
+export {
+  calculateMeanLuma,
+  calculateLumaStats,
+  evaluateCaptureQuality,
+  assessCanvasCaptureQuality,
+  assessDocumentCaptureQuality,
+  cropDocumentRoi,
+  getCaptureQualityGuidance,
+  QUALITY_FRAME_COLORS
+} from './opencv/quality';
+export type {
+  CaptureQuality,
+  CaptureQualityLevel,
+  CaptureQualityReason
+} from './opencv/quality';

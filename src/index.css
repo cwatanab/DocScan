@@ -526,22 +526,34 @@ html, body {
 }
 
 .scanner-guidance-text {
-  font-size: 12px; /* サイズアップ (10px -> 12px) */
+  font-size: 12px;
   font-weight: 700;
-  color: var(--accent); /* エメラルドグリーン */
   letter-spacing: 0.5px;
   margin: 0;
-  line-height: 1.2;
-  animation: pulseGuidance 2s infinite ease-in-out; /* さりげないパルス点滅 */
+  line-height: 1.35;
+  transition: color 0.2s ease;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+.scanner-guidance-none {
+  color: #94a3b8;
+}
+.scanner-guidance-good {
+  color: #34d399;
+  animation: pulseGuidanceGood 2s infinite ease-in-out;
+}
+.scanner-guidance-fair {
+  color: #fbbf24;
+}
+.scanner-guidance-poor {
+  color: #f87171;
 }
 
-@keyframes pulseGuidance {
+@keyframes pulseGuidanceGood {
   0%, 100% {
-    opacity: 0.85;
+    opacity: 0.88;
   }
   50% {
     opacity: 1;
-    color: #34d399; /* わずかに明るいエメラルドにシフト */
   }
 }
 
@@ -569,16 +581,23 @@ html, body {
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 0 20px rgba(99, 102, 241, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.15);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.scanner-shutter-btn.scanner-shutter-good {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.15);
+}
+.scanner-shutter-btn.scanner-shutter-fair {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.12);
+}
+.scanner-shutter-btn.scanner-shutter-poor {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.45), inset 0 0 10px rgba(255, 255, 255, 0.12);
 }
 .scanner-shutter-btn:hover:not(:disabled) {
   border-color: #ffffff;
-  box-shadow: 0 0 30px rgba(99, 102, 241, 0.85), inset 0 0 12px rgba(255, 255, 255, 0.3);
   transform: scale(1.03);
 }
 .scanner-shutter-btn:active:not(:disabled) {
   transform: scale(0.92);
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.6);
 }
 .scanner-shutter-btn:disabled {
   opacity: 0.4;
