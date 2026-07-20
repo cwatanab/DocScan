@@ -269,7 +269,7 @@ export function getCaptureQualityGuidance(
     return '書類全体が写るようにしてください';
   }
   if (level === 'good') {
-    return 'そのままシャッターを押せます';
+    return 'シャッターを押してください';
   }
 
   const hasDark = reasons.includes('dark');

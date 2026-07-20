@@ -63,7 +63,7 @@ describe('evaluateCaptureQuality', () => {
 describe('getCaptureQualityGuidance', () => {
   test('none and good messages', () => {
     expect(getCaptureQualityGuidance('none', [])).toContain('書類全体');
-    expect(getCaptureQualityGuidance('good', [])).toContain('シャッター');
+    expect(getCaptureQualityGuidance('good', [])).toBe('シャッターを押してください');
   });
 
   test('uses the same copy for fair and poor (severity color carries severity)', () => {
