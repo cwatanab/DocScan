@@ -39,8 +39,10 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const previewImageRef = useRef<HTMLImageElement>(null);
+  const warpInFlightRef = useRef(false);
   const [cvReady, setCvReady] = useState(() => isOpenCvReady());
   const [cvError, setCvError] = useState<string | null>(null);
+  const [warpError, setWarpError] = useState<string | null>(null);
 
   const [filterMode, setFilterMode] = useState<FilterMode>(
     initialFilterMode || 'document_enhanced'
@@ -60,11 +62,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [rotation, setRotation] = useState(0);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
-  const [isWarped, setIsWarped] = useState(initialIsWarped);
+  // 再編集復帰時もプレビュー生成完了まではトリミング側を維持し、空のフィルター画面を出さない
+  const [isWarped, setIsWarped] = useState(false);
   const [warpedImage, setWarpedImage] = useState<string | null>(null);
+  const [isWarping, setIsWarping] = useState(false);
   const [enableOcr, setEnableOcr] = useState<boolean>(() =>
     loadJson(STORAGE_KEY_ENABLE_OCR, false)
   );
+  const autoWarpOnMountRef = useRef(initialIsWarped);
 
   const handleToggleOcr = (val: boolean) => {
     setEnableOcr(val);
@@ -123,36 +128,63 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const handleWarpPreview = useCallback(
     async (autoDetectFilter: boolean = false, targetRotation: number = rotation) => {
       if (!cvReady) return;
-      if (corners.length !== 4 || !imageRef.current) return;
+      if (corners.length !== 4) return;
+      if (warpInFlightRef.current) return;
 
-      let targetFilterMode = filterMode;
+      warpInFlightRef.current = true;
+      setIsWarping(true);
+      setWarpError(null);
 
-      if (autoDetectFilter) {
-        const { mode } = await detectOptimalFilter(imageSrc, corners);
-        targetFilterMode = mode;
-        setFilterMode(targetFilterMode);
-      }
+      try {
+        let targetFilterMode = filterMode;
 
-      const url = processWarpAndFilter(
-        imageRef.current,
-        corners,
-        targetFilterMode,
-        targetRotation
-      );
-      if (url) {
+        if (autoDetectFilter) {
+          const { mode } = await detectOptimalFilter(imageSrc, corners);
+          targetFilterMode = mode;
+          setFilterMode(targetFilterMode);
+        }
+
+        // await 後もソース画像が使えることを確認する
+        const sourceEl = imageRef.current;
+        if (!sourceEl || !(sourceEl.naturalWidth || sourceEl.width)) {
+          throw new Error('ソース画像の読み込みが完了していません');
+        }
+
+        const url = processWarpAndFilter(
+          sourceEl,
+          corners,
+          targetFilterMode,
+          targetRotation
+        );
+        if (!url) {
+          throw new Error('画像の補正に失敗しました');
+        }
+
         setWarpedImage(url);
         setIsWarped(true);
+      } catch (err) {
+        console.error('[DocumentEditor] warp preview failed:', err);
+        setWarpError(
+          err instanceof Error ? err.message : '画像の補正に失敗しました。もう一度お試しください。'
+        );
+      } finally {
+        warpInFlightRef.current = false;
+        setIsWarping(false);
       }
     },
     [corners, filterMode, rotation, cvReady, imageSrc]
   );
 
+  // 再編集復帰時: 画像サイズと 4 隅が揃ったら自動でフィルター画面へ
   useEffect(() => {
     if (!cvReady) return;
-    if (initialIsWarped && imageSize.width > 0 && corners.length === 4 && !warpedImage) {
-      handleWarpPreview(false);
-    }
-  }, [initialIsWarped, imageSize, corners, warpedImage, handleWarpPreview, cvReady]);
+    if (!autoWarpOnMountRef.current) return;
+    if (imageSize.width <= 0 || corners.length !== 4) return;
+    if (warpedImage) return;
+
+    autoWarpOnMountRef.current = false;
+    void handleWarpPreview(false);
+  }, [cvReady, imageSize, corners, warpedImage, handleWarpPreview]);
 
   const handleImageLoad = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -194,8 +226,8 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     [draggedIndex, handleMove]
   );
 
-  // フィルター／回転の変更時のみ再ワープする。
-  // isWarped の true 遷移自体では再実行しない（初回プレビューとの二重実行を防ぐ）。
+  // フィルター／回転変更時にプレビューを再生成する
+  // isWarped 入場時の二重実行は skipInitial で避ける（入場時は handleWarpPreview が既に生成済み）
   const prevFilterRotationRef = useRef<{ filterMode: FilterMode; rotation: number } | null>(null);
   useEffect(() => {
     if (!cvReady || !isWarped) {
@@ -208,12 +240,10 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     const prev = prevFilterRotationRef.current;
     prevFilterRotationRef.current = { filterMode, rotation };
 
-    // フィルター画面に入った直後は prev が null。初回ワープは handleWarpPreview 側で済んでいる
     if (!prev) return;
+    if (prev.filterMode === filterMode && prev.rotation === rotation) return;
 
-    if (prev.filterMode !== filterMode || prev.rotation !== rotation) {
-      handleWarpPreview(false, rotation);
-    }
+    void handleWarpPreview(false, rotation);
   }, [filterMode, rotation, isWarped, handleWarpPreview, cvReady]);
 
   const handleConfirm = useCallback(() => {
@@ -246,6 +276,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
         <button
           onClick={isWarped ? () => setIsWarped(false) : onCancel}
           className="btn-text-nav"
+          disabled={isWarping}
         >
           {'< 戻る'}
         </button>
@@ -253,24 +284,33 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           {isWarped ? 'フィルター適用' : 'トリミング調整'}
         </h3>
         <button
-          onClick={isWarped ? handleConfirm : () => handleWarpPreview(true)}
+          onClick={isWarped ? handleConfirm : () => void handleWarpPreview(true)}
           className="btn-text-nav btn-text-accent"
+          disabled={isWarping}
         >
-          {'次へ >'}
+          {isWarping ? '処理中…' : '次へ >'}
         </button>
       </div>
 
+      {warpError && (
+        <div className="toast-banner toast-banner-warning" role="alert">
+          <p className="toast-banner-text">{warpError}</p>
+          <button type="button" className="toast-banner-dismiss" onClick={() => setWarpError(null)}>
+            閉じる
+          </button>
+        </div>
+      )}
+
       <div className="editor-workspace">
+        {isWarping && !warpedImage && (
+          <div className="editor-warp-loading">
+            <div className="spinner spinner-large" />
+            <p>画像を補正しています…</p>
+          </div>
+        )}
+
         {isWarped && warpedImage && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              maxWidth: '100%',
-              maxHeight: '100%'
-            }}
-          >
+          <div className={`editor-preview-wrap${isWarping ? ' editor-preview-wrap-busy' : ''}`}>
             <img
               ref={previewImageRef}
               src={warpedImage}
@@ -280,13 +320,19 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           </div>
         )}
 
-        {/* filterMode 切替時に imageRef が null にならないよう display:none で保持 */}
+        {/*
+          display:none だと一部環境でピクセル読み出しに失敗するため、
+          フィルター画面中は視覚的に隠すだけにして DOM 上は維持する。
+        */}
         <div
           ref={containerRef}
           className="editor-interactive-canvas"
           style={{
-            display: isWarped ? 'none' : 'inline-block',
-            position: 'relative'
+            position: isWarped || isWarping ? 'absolute' : 'relative',
+            visibility: isWarped || isWarping ? 'hidden' : 'visible',
+            pointerEvents: isWarped || isWarping ? 'none' : 'auto',
+            left: isWarped || isWarping ? 0 : undefined,
+            top: isWarped || isWarping ? 0 : undefined
           }}
         >
           <img
@@ -379,6 +425,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 onClick={() => handleSetColorMode('color')}
                 className={`filter-tab-btn ${colorMode === 'color' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
+                disabled={isWarping}
               >
                 カラー
               </button>
@@ -387,6 +434,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 onClick={() => handleSetColorMode('document')}
                 className={`filter-tab-btn ${colorMode === 'document' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
+                disabled={isWarping}
               >
                 白黒
               </button>
@@ -401,6 +449,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 onClick={() => handleSetEnhancementMode('enhanced')}
                 className={`filter-tab-btn ${enhancementMode === 'enhanced' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
+                disabled={isWarping}
               >
                 あり
               </button>
@@ -409,6 +458,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 onClick={() => handleSetEnhancementMode('original')}
                 className={`filter-tab-btn ${enhancementMode === 'original' ? 'filter-tab-btn-active' : ''}`}
                 style={{ flex: 1 }}
+                disabled={isWarping}
               >
                 なし
               </button>
@@ -429,6 +479,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                   justifyContent: 'center',
                   gap: '6px'
                 }}
+                disabled={isWarping}
               >
                 <RotateCcw style={{ width: '12px', height: '12px' }} />
                 左90°
@@ -444,6 +495,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                   justifyContent: 'center',
                   gap: '6px'
                 }}
+                disabled={isWarping}
               >
                 <RotateCw style={{ width: '12px', height: '12px' }} />
                 右90°

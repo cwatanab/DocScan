@@ -33,8 +33,8 @@ export function warpImage(
   const sortedCorners = sortPoints(corners);
   const [tl, tr, br, bl] = sortedCorners;
 
-  const maxWidth = Math.max(distance(br, bl), distance(tr, tl));
-  const maxHeight = Math.max(distance(tr, br), distance(tl, bl));
+  const maxWidth = Math.max(1, Math.round(Math.max(distance(br, bl), distance(tr, tl))));
+  const maxHeight = Math.max(1, Math.round(Math.max(distance(tr, br), distance(tl, bl))));
 
   const dstCanvas = document.createElement('canvas');
   dstCanvas.width = maxWidth;
@@ -116,6 +116,29 @@ export function rotateImage90(
 }
 
 /**
+ * HTMLImageElement から確実にピクセルを読むための Canvas 化。
+ * display:none や iOS のデコード未完了時の cv.imread 失敗を避ける。
+ */
+function imageToCanvas(imageEl: HTMLImageElement): HTMLCanvasElement | null {
+  const w = imageEl.naturalWidth || imageEl.width;
+  const h = imageEl.naturalHeight || imageEl.height;
+  if (w <= 0 || h <= 0) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  try {
+    ctx.drawImage(imageEl, 0, 0, w, h);
+  } catch (err) {
+    console.error('Failed to draw image to canvas for warp:', err);
+    return null;
+  }
+  return canvas;
+}
+
+/**
  * 台形補正とフィルター処理を行い、結果の DataURL を生成する
  */
 export function processWarpAndFilter(
@@ -126,22 +149,31 @@ export function processWarpAndFilter(
 ): string | null {
   const cv = window.cv;
   if (!cv) return null;
+  if (!corners || corners.length !== 4) return null;
 
   const sortedCorners = sortPoints(corners);
   const [tl, tr, br, bl] = sortedCorners;
 
-  const maxWidth = Math.max(distance(br, bl), distance(tr, tl));
-  const maxHeight = Math.max(distance(tr, br), distance(tl, bl));
+  const maxWidth = Math.max(1, Math.round(Math.max(distance(br, bl), distance(tr, tl))));
+  const maxHeight = Math.max(1, Math.round(Math.max(distance(tr, br), distance(tl, bl))));
+
+  // 非表示や iOS デコード問題を避けるため、いったん Canvas に描画してから imread する
+  const sourceCanvas = imageToCanvas(imageEl);
+  if (!sourceCanvas) {
+    console.error('processWarpAndFilter: source image has no drawable pixels');
+    return null;
+  }
 
   let src: any = null;
   let warped: any = null;
   let dst: any = null;
+  let rotated: any = null;
   let srcCoords: any = null;
   let dstCoords: any = null;
   let M: any = null;
 
   try {
-    src = cv.imread(imageEl);
+    src = cv.imread(sourceCanvas);
     warped = new cv.Mat();
 
     srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [
@@ -159,17 +191,31 @@ export function processWarpAndFilter(
     ]);
 
     M = cv.getPerspectiveTransform(srcCoords, dstCoords);
-    cv.warpPerspective(src, warped, M, new cv.Size(maxWidth, maxHeight), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+    cv.warpPerspective(
+      src,
+      warped,
+      M,
+      new cv.Size(maxWidth, maxHeight),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar()
+    );
 
     dst = new cv.Mat();
     applyFilterToMat(warped, dst, filterMode);
 
-    if (rotation === 90) {
-      cv.rotate(dst, dst, cv.ROTATE_90_CLOCKWISE);
-    } else if (rotation === 180) {
-      cv.rotate(dst, dst, cv.ROTATE_180);
-    } else if (rotation === 270) {
-      cv.rotate(dst, dst, cv.ROTATE_90_COUNTERCLOCKWISE);
+    // 90/270 度はサイズが入れ替わるため、in-place rotate ではなく別 Mat へ出力する
+    let output = dst;
+    if (rotation === 90 || rotation === 180 || rotation === 270) {
+      rotated = new cv.Mat();
+      if (rotation === 90) {
+        cv.rotate(dst, rotated, cv.ROTATE_90_CLOCKWISE);
+      } else if (rotation === 180) {
+        cv.rotate(dst, rotated, cv.ROTATE_180);
+      } else {
+        cv.rotate(dst, rotated, cv.ROTATE_90_COUNTERCLOCKWISE);
+      }
+      output = rotated;
     }
 
     const resultCanvas = document.createElement('canvas');
@@ -181,9 +227,12 @@ export function processWarpAndFilter(
       resultCanvas.height = maxHeight;
     }
 
-    cv.imshow(resultCanvas, dst);
+    cv.imshow(resultCanvas, output);
     return resultCanvas.toDataURL('image/jpeg', 0.95);
+  } catch (err) {
+    console.error('processWarpAndFilter failed:', err);
+    return null;
   } finally {
-    safeDeleteAll(src, warped, dst, srcCoords, dstCoords, M);
+    safeDeleteAll(src, warped, dst, rotated, srcCoords, dstCoords, M);
   }
 }
