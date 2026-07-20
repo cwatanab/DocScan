@@ -66,9 +66,16 @@ describe('getCaptureQualityGuidance', () => {
     expect(getCaptureQualityGuidance('good', [])).toContain('シャッター');
   });
 
-  test('mentions darkness or blur for fair/poor', () => {
-    expect(getCaptureQualityGuidance('fair', ['dark'])).toMatch(/明る/);
-    expect(getCaptureQualityGuidance('fair', ['blur'])).toMatch(/ブレ/);
-    expect(getCaptureQualityGuidance('poor', ['dark', 'blur'])).toMatch(/暗い|不鮮明/);
+  test('uses the same copy for fair and poor (severity color carries severity)', () => {
+    expect(getCaptureQualityGuidance('fair', ['dark'])).toBe('もう少し明るくしてください');
+    expect(getCaptureQualityGuidance('poor', ['dark'])).toBe('もう少し明るくしてください');
+    expect(getCaptureQualityGuidance('fair', ['blur'])).toBe('手ブレ注意：端末を安定させてください');
+    expect(getCaptureQualityGuidance('poor', ['blur'])).toBe('手ブレ注意：端末を安定させてください');
+    expect(getCaptureQualityGuidance('fair', ['dark', 'blur'])).toBe(
+      '明るさとピントを調整してください'
+    );
+    expect(getCaptureQualityGuidance('poor', ['dark', 'blur'])).toBe(
+      '明るさとピントを調整してください'
+    );
   });
 });

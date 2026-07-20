@@ -275,13 +275,8 @@ export function getCaptureQualityGuidance(
   const hasDark = reasons.includes('dark');
   const hasBlur = reasons.includes('blur');
 
-  if (level === 'poor') {
-    if (hasDark && hasBlur) return '暗い・不鮮明です。明るさと安定を確保してください';
-    if (hasDark) return '暗すぎます。光源に近づけるか明るくしてください';
-    return '大きくブレています。端末を固定してください';
-  }
-
+  // fair / poor とも同じ文言（枠色で重大度を示す）
   if (hasDark && hasBlur) return '明るさとピントを調整してください';
   if (hasDark) return 'もう少し明るくしてください';
-  return 'ブレています。端末を安定させてください';
+  return '手ブレ注意：端末を安定させてください';
 }
