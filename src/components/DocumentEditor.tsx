@@ -466,44 +466,6 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           </div>
 
           <div className="filter-tabs-container">
-            <span className="filter-tabs-label">画像の回転</span>
-            <div className="filter-tabs">
-              <button
-                type="button"
-                onClick={() => handleRotate(false)}
-                className="filter-tab-btn"
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px'
-                }}
-                disabled={isWarping}
-              >
-                <RotateCcw style={{ width: '12px', height: '12px' }} />
-                左90°
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRotate(true)}
-                className="filter-tab-btn"
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px'
-                }}
-                disabled={isWarping}
-              >
-                <RotateCw style={{ width: '12px', height: '12px' }} />
-                右90°
-              </button>
-            </div>
-          </div>
-
-          <div className="filter-tabs-container">
             <span className="filter-tabs-label">保存形式</span>
             <div className="filter-tabs">
               <button
@@ -521,6 +483,30 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 style={{ flex: 1 }}
               >
                 PNG/JPEG
+              </button>
+            </div>
+          </div>
+
+          <div className="filter-tabs-container">
+            <span className="filter-tabs-label">画像の回転</span>
+            <div className="filter-action-btns">
+              <button
+                type="button"
+                onClick={() => handleRotate(false)}
+                className="filter-action-btn"
+                disabled={isWarping}
+              >
+                <RotateCcw className="filter-action-btn-icon" />
+                左90°
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRotate(true)}
+                className="filter-action-btn"
+                disabled={isWarping}
+              >
+                <RotateCw className="filter-action-btn-icon" />
+                右90°
               </button>
             </div>
           </div>

@@ -831,6 +831,49 @@ html, body {
   color: #fff;
   box-shadow: var(--shadow-glow);
 }
+
+/* トグル（セグメント）とは別系統の「操作ボタン」——回転など一回押し用 */
+.filter-action-btns {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 260px;
+}
+.filter-action-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background-color: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  white-space: nowrap;
+}
+.filter-action-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  background-color: rgba(99, 102, 241, 0.08);
+  color: #fff;
+}
+.filter-action-btn:active:not(:disabled) {
+  transform: scale(0.97);
+  background-color: rgba(99, 102, 241, 0.16);
+}
+.filter-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.filter-action-btn-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
 .btn-secondary-full {
   width: 100%;
   padding: 12px;
