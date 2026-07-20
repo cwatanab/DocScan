@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { sortPoints } from '../utils/opencvHelper';
-import type { Point } from '../utils/opencvHelper';
+import { sortPoints, type Point } from '../utils/geometry';
 
 interface UseCropHandlesProps {
   initialCorners: Point[];
@@ -70,6 +69,8 @@ export const useCropHandles = ({
 
     ctx.clearRect(0, 0, size, size);
 
+    // clip は save/restore で囲み、連続ドラッグ時にクリップ領域が積み重ならないようにする
+    ctx.save();
     ctx.beginPath();
     ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
     ctx.clip();
@@ -87,10 +88,11 @@ export const useCropHandles = ({
       size,
       size
     );
+    ctx.restore();
 
     // 十字線の描画
     ctx.strokeStyle = '#10b981';
-    ctx.lineWidth = 4; // 太くして見やすく
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(size / 2, 0);
     ctx.lineTo(size / 2, size);
@@ -100,7 +102,7 @@ export const useCropHandles = ({
 
     // 白い外枠の描画
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 8; // 太くして見やすく
+    ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
     ctx.stroke();

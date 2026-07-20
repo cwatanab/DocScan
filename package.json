@@ -1,12 +1,13 @@
 {
-  "name": "temp-project",
+  "name": "docscan",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "bun test src/utils",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,8 +17,7 @@
     "pdf-lib": "^1.17.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "scanic-ml": "^0.2.0",
-    "sharp": "^0.35.3"
+    "scanic-ml": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

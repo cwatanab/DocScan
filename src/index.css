@@ -1400,3 +1400,99 @@ input:checked + .switch-slider-mini:before {
 .btn-padding-large {
   padding: 12px 24px !important;
 }
+
+/* --- トースト／警告バナー --- */
+.toast-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 20;
+}
+.toast-banner-warning {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fde68a;
+}
+.toast-banner-text {
+  margin: 0;
+  flex: 1;
+  text-align: left;
+}
+.toast-banner-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.85;
+}
+.toast-banner-dismiss:hover {
+  opacity: 1;
+}
+
+/* --- スキャナー省電力スリープ --- */
+.scanner-sleep-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 13, 22, 0.90);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100000;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: opacity 0.3s ease;
+}
+.scanner-sleep-icon-ring {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(97, 144, 176, 0.15);
+  border: 2px solid rgba(97, 144, 176, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  box-shadow: 0 0 20px rgba(97, 144, 176, 0.2);
+}
+.scanner-sleep-icon {
+  width: 32px;
+  height: 32px;
+  color: #6190b0;
+}
+.scanner-sleep-title {
+  color: #ffffff;
+  font-size: 20px;
+  margin: 0 0 8px;
+  font-weight: bold;
+}
+.scanner-sleep-desc {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  text-align: center;
+  margin: 0 24px 24px;
+  line-height: 1.5;
+}
+.scanner-sleep-resume-btn {
+  background: linear-gradient(135deg, #6190b0 0%, #4b7391 100%);
+  color: #ffffff;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: bold;
+  box-shadow: 0 4px 15px rgba(97, 144, 176, 0.3);
+  cursor: pointer;
+  pointer-events: none;
+}

@@ -2,6 +2,7 @@ import { CameraScanner } from './components/CameraScanner';
 import { DocumentEditor } from './components/DocumentEditor';
 import { ExportPreview } from './components/ExportPreview';
 import { useScanSession } from './utils/useScanSession';
+
 export default function App() {
   const {
     step,
@@ -12,6 +13,8 @@ export default function App() {
     exportMode,
     initialIsWarped,
     isOcrLoading,
+    ocrError,
+    dismissOcrError,
     flyingImage,
     currentFilterMode,
     capture,
@@ -59,10 +62,11 @@ export default function App() {
           onComplete={exportComplete}
           onBackToScanner={backToScanner}
           onBackToEdit={backToEdit}
+          ocrError={ocrError}
+          onDismissOcrError={dismissOcrError}
         />
       )}
 
-      {/* 確定時の画像飛行（フワッと吸い込まれる）オーバーレイ */}
       {flyingImage && (
         <div className="flying-image-overlay">
           <img
@@ -83,4 +87,3 @@ export default function App() {
     </div>
   );
 }
-

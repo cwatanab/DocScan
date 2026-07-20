@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Download, Share2, Copy } from 'lucide-react';
 import type { OcrResult } from '../utils/ocrHelper';
 import { createSearchablePdf } from '../utils/pdfHelper';
@@ -11,16 +11,61 @@ import {
   downloadSinglePage,
   downloadAllPages,
   shareSinglePage,
-  shareAllPages
+  shareAllPages,
+  type ExportFormat
 } from '../utils/imageExportHelper';
 
 interface ExportPreviewProps {
-  pages: string[]; // 補正済み画像のDataURL配列
+  pages: string[];
   exportMode: 'pdf' | 'jpeg';
-  ocrResults: { [key: number]: OcrResult }; // Propsとして受け取る
+  ocrResults: { [key: number]: OcrResult };
   onComplete: () => void;
   onBackToScanner: () => void;
   onBackToEdit?: () => void;
+  ocrError?: string | null;
+  onDismissOcrError?: () => void;
+}
+
+/** 画像フォーマット共通のダウンロード／共有ハンドラを生成する */
+function useImageFormatHandlers(pages: string[]) {
+  const makeHandlers = useCallback(
+    (format: ExportFormat) => ({
+      download: async (imageSrc: string, index: number, timestamp?: string) => {
+        try {
+          await downloadSinglePage(imageSrc, index, format, timestamp);
+        } catch (err) {
+          console.error(`Failed to download as ${format}:`, err);
+        }
+      },
+      downloadAll: async () => {
+        try {
+          await downloadAllPages(pages, format);
+        } catch (err) {
+          console.error(`Failed to download all ${format}s:`, err);
+        }
+      },
+      shareSingle: async (imageSrc: string, index: number) => {
+        try {
+          await shareSinglePage(imageSrc, index, format);
+        } catch (err) {
+          console.error(`Failed to share single ${format}:`, err);
+        }
+      },
+      shareAll: async () => {
+        try {
+          await shareAllPages(pages, format);
+        } catch (err) {
+          console.error(`Failed to share ${format}s:`, err);
+        }
+      }
+    }),
+    [pages]
+  );
+
+  const png = useMemo(() => makeHandlers('png'), [makeHandlers]);
+  const jpeg = useMemo(() => makeHandlers('jpeg'), [makeHandlers]);
+
+  return { png, jpeg };
 }
 
 export const ExportPreview: React.FC<ExportPreviewProps> = ({
@@ -29,17 +74,25 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
   ocrResults,
   onComplete,
   onBackToScanner,
-  onBackToEdit
+  onBackToEdit,
+  ocrError = null,
+  onDismissOcrError
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [activeTab, setActiveTab] = useState<'pdf' | 'text'>('pdf');
   const [error, setError] = useState<string | null>(null);
-  
-  // 拡大プレビュー用のステート
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 再現HTML文字列の事前生成 (プレビューおよびエクスポートで共有)
+  // 生成中の PDF が古い pages/ocr に対応していない場合の破棄用世代カウンタ
+  const pdfGenerationIdRef = useRef(0);
+  const pagesKey = useMemo(
+    () => `${pages.length}:${pages.map((p) => p.length).join(',')}:${Object.keys(ocrResults).join(',')}`,
+    [pages, ocrResults]
+  );
+
+  const { png, jpeg } = useImageFormatHandlers(pages);
+
   const htmlContent = useMemo(() => {
     const htmlData = pages.map((_, index) => ({
       ocrResult: ocrResults[index]
@@ -47,63 +100,42 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     return createReproducedHtml(htmlData);
   }, [pages, ocrResults]);
 
-
-
-  // マウント時にPDFモードであれば、バックグラウンドで自動的にPDF生成を開始する (OCRはすでに完了済み)
+  // PDF モード時はバックグラウンドで生成する。
+  // pagesKey 変化でキャッシュを無効化し、世代 ID で古い結果を破棄する。
   useEffect(() => {
-    if (exportMode === 'pdf' && !pdfBlob) {
-      const pdfData = pages.map((imageSrc, index) => ({
-        imageSrc,
-        ocrResult: ocrResults[index]
-      }));
-      createSearchablePdf(pdfData)
-        .then(blob => setPdfBlob(blob))
-        .catch(err => {
-          console.error("PDF generation failed on mount:", err);
-        });
+    if (exportMode !== 'pdf') {
+      setPdfBlob(null);
+      return;
     }
-  }, [exportMode, ocrResults, pages, pdfBlob]);
 
-  // PNGとして保存
-  const handleDownloadPng = useCallback(async (imageSrc: string, index: number, timestamp?: string) => {
-    try {
-      await downloadSinglePage(imageSrc, index, 'png', timestamp);
-    } catch (err) {
-      console.error('Failed to download as PNG:', err);
-    }
-  }, []);
+    setPdfBlob(null);
+    const generationId = ++pdfGenerationIdRef.current;
+    let cancelled = false;
 
-  // 全ページをPNGとして順次ダウンロード保存
-  const handleDownloadAllPngs = useCallback(async () => {
-    try {
-      await downloadAllPages(pages, 'png');
-    } catch (err) {
-      console.error('Failed to download all PNGs:', err);
-    }
-  }, [pages]);
+    const pdfData = pages.map((imageSrc, index) => ({
+      imageSrc,
+      ocrResult: ocrResults[index]
+    }));
 
-  // 個別PNGの共有
-  const handleShareSinglePng = useCallback(async (imageSrc: string, index: number) => {
-    try {
-      await shareSinglePage(imageSrc, index, 'png');
-    } catch (err) {
-      console.error("Failed to share single PNG:", err);
-    }
-  }, []);
+    createSearchablePdf(pdfData)
+      .then((blob) => {
+        if (cancelled || generationId !== pdfGenerationIdRef.current) return;
+        setPdfBlob(blob);
+      })
+      .catch((err) => {
+        if (cancelled || generationId !== pdfGenerationIdRef.current) return;
+        console.error('PDF generation failed on mount:', err);
+      });
 
-  // 全ページの一括PNG共有
-  const handleSharePngs = useCallback(async () => {
-    try {
-      await shareAllPages(pages, 'png');
-    } catch (err) {
-      console.error("Failed to share PNGs:", err);
-    }
-  }, [pages]);
+    return () => {
+      cancelled = true;
+    };
+  }, [exportMode, pages, ocrResults, pagesKey]);
 
-  // 必要に応じてPDFを生成する関数 (すでにOCRは完了しているため、結合のみを実行)
   const ensurePdfGenerated = useCallback(async (): Promise<Blob | null> => {
     if (pdfBlob) return pdfBlob;
 
+    const generationId = ++pdfGenerationIdRef.current;
     setIsProcessing(true);
     setError(null);
     try {
@@ -112,25 +144,31 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         ocrResult: ocrResults[index]
       }));
       const generatedBlob = await createSearchablePdf(pdfData);
+      if (generationId !== pdfGenerationIdRef.current) {
+        return null;
+      }
       setPdfBlob(generatedBlob);
       return generatedBlob;
-    } catch (err: any) {
+    } catch (err) {
+      if (generationId !== pdfGenerationIdRef.current) {
+        return null;
+      }
       console.error('PDF generation error:', err);
       setError('PDFの生成中にエラーが発生しました。もう一度お試しください。');
       return null;
     } finally {
-      setIsProcessing(false);
+      if (generationId === pdfGenerationIdRef.current) {
+        setIsProcessing(false);
+      }
     }
   }, [pdfBlob, pages, ocrResults]);
 
-  // PDFダウンロード
   const handleDownloadPdf = useCallback(async () => {
     const blob = await ensurePdfGenerated();
     if (!blob) return;
     triggerBlobDownload(blob, `DocScan_${getFormattedTimestamp()}.pdf`);
   }, [ensurePdfGenerated]);
 
-  // HTMLダウンロード (Approach B: テキスト再現HTML)
   const handleDownloadHtml = useCallback(() => {
     try {
       const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
@@ -141,7 +179,6 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     }
   }, [htmlContent]);
 
-  // HTML共有 (Web Share API)
   const handleShareHtml = useCallback(() => {
     try {
       const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
@@ -149,9 +186,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
       const file = new File([blob], fileName, { type: 'text/html' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({
-          files: [file],
-        }).catch(err => {
+        navigator.share({ files: [file] }).catch((err) => {
           if (err.name !== 'AbortError') {
             console.error('HTML share failed:', err);
           }
@@ -165,57 +200,18 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     }
   }, [htmlContent]);
 
-  // JPEG(画像)として保存
-  const handleDownloadJpeg = useCallback(async (imageSrc: string, index: number, timestamp?: string) => {
-    try {
-      await downloadSinglePage(imageSrc, index, 'jpeg', timestamp);
-    } catch (err) {
-      console.error('Failed to download as JPEG:', err);
-    }
-  }, []);
-
-  // 全ページをJPEGとして順次ダウンロード保存
-  const handleDownloadAllJpegs = useCallback(async () => {
-    try {
-      await downloadAllPages(pages, 'jpeg');
-    } catch (err) {
-      console.error('Failed to download all JPEGs:', err);
-    }
-  }, [pages]);
-
-  // 個別JPEGの共有
-  const handleShareSingleJpeg = useCallback(async (imageSrc: string, index: number) => {
-    try {
-      await shareSinglePage(imageSrc, index, 'jpeg');
-    } catch (err) {
-      console.error("Failed to share single JPEG:", err);
-    }
-  }, []);
-
-  // 全ページの一括JPEG共有
-  const handleShareJpegs = useCallback(async () => {
-    try {
-      await shareAllPages(pages, 'jpeg');
-    } catch (err) {
-      console.error("Failed to share JPEGs:", err);
-    }
-  }, [pages]);
-
-  // 共有（Web Share API）
   const handleShare = useCallback(async () => {
     const blob = await ensurePdfGenerated();
     if (!blob) return;
-    
+
     const fileName = `DocScan_${getFormattedTimestamp()}.pdf`;
     const file = new File([blob], fileName, { type: 'application/pdf' });
-    
+
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({
-          files: [file],
-        });
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
+        await navigator.share({ files: [file] });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
           console.error('Share failed:', err);
         }
       }
@@ -224,34 +220,42 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
     }
   }, [ensurePdfGenerated]);
 
-  // タブ切り替えハンドラ
   const handleTabChange = useCallback((tab: 'pdf' | 'text') => {
     setActiveTab(tab);
   }, []);
 
-  // 全文テキストのコピー
   const handleCopyText = useCallback(() => {
     const allText = Object.values(ocrResults)
-      .map(res => res.text)
+      .map((res) => res.text)
       .join('\n\n--- ページ区切り ---\n\n');
-    
-    navigator.clipboard.writeText(allText)
+
+    navigator.clipboard
+      .writeText(allText)
       .then(() => alert('テキストをクリップボードにコピーしました'))
-      .catch(err => console.error('Copy failed:', err));
+      .catch((err) => console.error('Copy failed:', err));
   }, [ocrResults]);
 
   if (isProcessing) {
     const title = exportMode === 'pdf' ? 'PDFの生成中' : '画像の書き出し中';
-    const desc = exportMode === 'pdf' 
-      ? '文字情報を埋め込み、検索可能なPDFを作成しています...'
-      : '画像ファイルを用意しています。しばらくお待ちください...';
+    const desc =
+      exportMode === 'pdf'
+        ? '文字情報を埋め込み、検索可能なPDFを作成しています...'
+        : '画像ファイルを用意しています。しばらくお待ちください...';
 
     return (
       <div className="loading-screen-blurred">
         <div className="loading-content-wrapper">
           <div className="spinner spinner-large" />
           <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{title}</h3>
-          <p style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '90%', lineHeight: '1.5', textAlign: 'center' }}>
+          <p
+            style={{
+              fontSize: '13px',
+              color: '#94a3b8',
+              maxWidth: '90%',
+              lineHeight: '1.5',
+              textAlign: 'center'
+            }}
+          >
             {desc}
           </p>
         </div>
@@ -265,10 +269,7 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         <div className="error-icon-large">⚠️</div>
         <h3 className="error-text-title">エラー</h3>
         <p className="error-text-desc">{error}</p>
-        <button
-          onClick={onBackToScanner}
-          className="btn-primary-small btn-padding-large"
-        >
+        <button onClick={onBackToScanner} className="btn-primary-small btn-padding-large">
           スキャンに戻る
         </button>
       </div>
@@ -277,25 +278,27 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
 
   return (
     <div className="export-container">
-      {/* ヘッダーバー */}
       <div className="header-bar">
-        <button
-          onClick={onBackToEdit || onBackToScanner}
-          className="btn-text-nav"
-        >
-          {"< 戻る"}
+        <button onClick={onBackToEdit || onBackToScanner} className="btn-text-nav">
+          {'< 戻る'}
         </button>
         <h3 style={{ fontSize: '16px', fontWeight: '600' }}>エクスポート</h3>
-        <button
-          onClick={onComplete}
-          className="btn-text-nav btn-text-accent"
-        >
-          {"完了 >"}
+        <button onClick={onComplete} className="btn-text-nav btn-text-accent">
+          {'完了 >'}
         </button>
       </div>
 
-      {/* タブ切り替え */}
-      {/* タブ切り替え */}
+      {ocrError && (
+        <div className="toast-banner toast-banner-warning" role="alert">
+          <p className="toast-banner-text">{ocrError}</p>
+          {onDismissOcrError && (
+            <button type="button" className="toast-banner-dismiss" onClick={onDismissOcrError}>
+              閉じる
+            </button>
+          )}
+        </div>
+      )}
+
       {exportMode === 'pdf' && (
         <div className="export-tab-bar">
           <button
@@ -313,25 +316,20 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         </div>
       )}
 
-      {/* プレビュー表示エリア */}
       <div className="export-content-area">
         {activeTab === 'pdf' ? (
-          /* PDF/画像プレビュー */
           <div className="export-preview-column">
-
-            {/* 各ページのサムネイル */}
             <ThumbnailGrid
               pages={pages}
               onPageClick={setPreviewImage}
               onBackToScanner={onBackToScanner}
-              onShareSingleJpeg={handleShareSingleJpeg}
-              onDownloadJpeg={handleDownloadJpeg}
-              onShareSinglePng={handleShareSinglePng}
-              onDownloadPng={handleDownloadPng}
+              onShareSingleJpeg={jpeg.shareSingle}
+              onDownloadJpeg={jpeg.download}
+              onShareSinglePng={png.shareSingle}
+              onDownloadPng={png.download}
             />
           </div>
         ) : (
-          /* OCR テキスト表示（再現HTMLプレビュー） */
           <div className="ocr-text-box" style={{ flex: 1, minHeight: '350px', maxWidth: 'none' }}>
             <div className="ocr-box-header" style={{ justifyContent: 'flex-end' }}>
               <div style={{ display: 'flex', gap: '12px' }}>
@@ -345,8 +343,19 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
                 </button>
               </div>
             </div>
-            
-            <div className="ocr-box-content" style={{ flex: 1, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', maxHeight: 'none' }}>
+
+            <div
+              className="ocr-box-content"
+              style={{
+                flex: 1,
+                padding: 0,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                maxHeight: 'none'
+              }}
+            >
               {Object.values(ocrResults).length > 0 ? (
                 <iframe
                   srcDoc={htmlContent}
@@ -370,40 +379,33 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         )}
       </div>
 
-      {/* 下部アクションバー */}
       <div className="export-footer">
         {exportMode === 'jpeg' ? (
-          /* JPEG/PNG用アクション (OCRなし・高速画像出力) */
           <div className="export-button-row" style={{ flexDirection: 'column' }}>
-            {/* 共有段 */}
             <div className="export-button-row">
-              <button
-                onClick={handleShareJpegs}
-                className="btn-primary-large btn-flex-1 btn-indigo"
-              >
+              <button onClick={jpeg.shareAll} className="btn-primary-large btn-flex-1 btn-indigo">
                 <Share2 style={{ width: '18px', height: '18px' }} />
                 JPEG共有
               </button>
               <button
-                onClick={handleSharePngs}
+                onClick={png.shareAll}
                 className="btn-primary-large btn-flex-1 btn-indigo-dark"
               >
                 <Share2 style={{ width: '18px', height: '18px' }} />
                 PNG共有
               </button>
             </div>
-            
-            {/* 保存段 */}
+
             <div className="export-button-row">
               <button
-                onClick={handleDownloadAllJpegs}
+                onClick={jpeg.downloadAll}
                 className="btn-secondary-large btn-flex-1 btn-slate"
               >
                 <Download style={{ width: '16px', height: '16px' }} />
                 JPEG保存
               </button>
               <button
-                onClick={handleDownloadAllPngs}
+                onClick={png.downloadAll}
                 className="btn-secondary-large btn-flex-1 btn-slate-dark"
               >
                 <Download style={{ width: '16px', height: '16px' }} />
@@ -412,20 +414,13 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
             </div>
           </div>
         ) : (
-          /* PDF用アクション (OCR付きサーチャブルPDF) */
           <>
             <div className="export-button-row">
-              <button
-                onClick={handleShare}
-                className="btn-primary-large btn-flex-1"
-              >
+              <button onClick={handleShare} className="btn-primary-large btn-flex-1">
                 <Share2 style={{ width: '18px', height: '18px' }} />
                 PDFを共有
               </button>
-              <button
-                onClick={handleShareHtml}
-                className="btn-primary-large btn-flex-1 btn-indigo"
-              >
+              <button onClick={handleShareHtml} className="btn-primary-large btn-flex-1 btn-indigo">
                 <Share2 style={{ width: '18px', height: '18px' }} />
                 HTMLを共有
               </button>
@@ -451,7 +446,6 @@ export const ExportPreview: React.FC<ExportPreviewProps> = ({
         )}
       </div>
 
-      {/* サムネイルクリック時の拡大プレビュー (Zoomable Lightbox) */}
       {previewImage && (
         <ZoomableImage
           src={previewImage}

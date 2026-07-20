@@ -1,7 +1,6 @@
 import * as ort from 'onnxruntime-web';
 import { setupOrtEnvironment } from './ortConfig';
-import type { Point } from './opencvHelper';
-import { sortPoints } from './opencvHelper';
+import { sortPoints, type Point } from './geometry';
 
 let docSegSession: ort.InferenceSession | null = null;
 let initPromise: Promise<ort.InferenceSession | null> | null = null;

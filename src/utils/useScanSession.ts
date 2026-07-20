@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import type { Point, FilterMode } from './opencvHelper';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import type { Point } from './geometry';
+import type { FilterMode } from './filterMode';
 import { performOcr } from './ocrHelper';
 import type { OcrResult } from './ocrHelper';
 
@@ -21,113 +22,136 @@ export function useScanSession() {
   const [exportMode, setExportMode] = useState<'pdf' | 'jpeg'>('pdf');
   const [initialIsWarped, setInitialIsWarped] = useState(false);
   const [isOcrLoading, setIsOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
   const [flyingImage, setFlyingImage] = useState<FlyingImage | null>(null);
 
-  // セッションを初期化し、最初のスキャン画面に戻る
-  const startNewScan = () => {
+  const scannedPagesRef = useRef(scannedPages);
+  scannedPagesRef.current = scannedPages;
+
+  const flyingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // アンマウント時に飛行アニメのタイマーを確実に解除する
+  useEffect(() => {
+    return () => {
+      if (flyingTimerRef.current !== null) {
+        clearTimeout(flyingTimerRef.current);
+        flyingTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearFlyingTimer = useCallback(() => {
+    if (flyingTimerRef.current !== null) {
+      clearTimeout(flyingTimerRef.current);
+      flyingTimerRef.current = null;
+    }
+  }, []);
+
+  const dismissOcrError = useCallback(() => {
+    setOcrError(null);
+  }, []);
+
+  const startNewScan = useCallback(() => {
+    clearFlyingTimer();
     setScannedPages([]);
     setOcrResults({});
     setScannedPageFilterModes([]);
     setCurrentRawImage(null);
+    setOcrError(null);
+    setFlyingImage(null);
     setStep('scan');
-  };
+  }, [clearFlyingTimer]);
 
-  // カメラスキャン画面での撮影完了時の処理
-  const capture = (imageSrc: string, corners: Point[]) => {
+  const capture = useCallback((imageSrc: string, corners: Point[]) => {
     setCurrentRawImage(imageSrc);
     setCurrentCorners(corners);
-    setInitialIsWarped(false); // トリミング調整から開始する
-    
-    // デフォルトフィルターモードを設定する
+    setInitialIsWarped(false);
     setCurrentFilterMode('document_enhanced');
-    
+    setOcrError(null);
     setStep('edit');
-  };
+  }, []);
 
-  // 編集画面での決定時の処理
-  const savePage = async (
-    warpedImageSrc: string,
-    filterMode: FilterMode,
-    enableOcr: boolean,
-    corners: Point[],
-    rect?: DOMRect | null
-  ) => {
-    setCurrentCorners(corners); // ユーザーが調整した座標を履歴保存用に上書き
-    setExportMode(enableOcr ? 'pdf' : 'jpeg');
-    setCurrentFilterMode(filterMode);
+  const savePage = useCallback(
+    async (
+      warpedImageSrc: string,
+      filterMode: FilterMode,
+      enableOcr: boolean,
+      corners: Point[],
+      rect?: DOMRect | null
+    ) => {
+      setCurrentCorners(corners);
+      setExportMode(enableOcr ? 'pdf' : 'jpeg');
+      setCurrentFilterMode(filterMode);
+      setOcrError(null);
 
+      // 確定前の長さを基準にインデックスを決める（連打時のズレを防ぐ）
+      const pageIndex = scannedPagesRef.current.length;
+      setScannedPageFilterModes((prev) => [...prev, filterMode]);
 
-    setScannedPageFilterModes(prev => [...prev, filterMode]);
-
-    if (rect) {
-      setFlyingImage({
-        src: warpedImageSrc,
-        rect
-      });
-      // 0.65秒後に飛行画像をフェードアウトさせてクリアする
-      setTimeout(() => {
-        setFlyingImage(null);
-      }, 650);
-    }
-
-    if (enableOcr) {
-      setIsOcrLoading(true);
-      try {
-        const index = scannedPages.length;
-        const ocrResult = await performOcr(warpedImageSrc);
-        setOcrResults(prev => ({ ...prev, [index]: ocrResult }));
-      } catch (err) {
-        console.error("OCR failed during savePage:", err);
-      } finally {
-        setIsOcrLoading(false);
+      if (rect) {
+        clearFlyingTimer();
+        setFlyingImage({ src: warpedImageSrc, rect });
+        flyingTimerRef.current = setTimeout(() => {
+          setFlyingImage(null);
+          flyingTimerRef.current = null;
+        }, 650);
       }
-    }
-    
-    setScannedPages(prev => [...prev, warpedImageSrc]);
-    setStep('export'); // 確定後は即座にプレビュー画面に進む
-  };
 
-  // 編集画面でのキャンセル時の処理
-  const cancelEdit = () => {
-    setCurrentRawImage(null); // 一時生画像のキャッシュをクリアする
-    if (scannedPages.length > 0) {
-      setStep('export'); // スキャン済ページがある場合はエクスポート画面に戻る
-    } else {
-      setStep('scan'); // ない場合はカメラ画面に戻る
-    }
-  };
+      if (enableOcr) {
+        setIsOcrLoading(true);
+        try {
+          const ocrResult = await performOcr(warpedImageSrc);
+          setOcrResults((prev) => ({ ...prev, [pageIndex]: ocrResult }));
+        } catch (err) {
+          console.error('OCR failed during savePage:', err);
+          setOcrError(
+            'OCR解析に失敗しました。画像の保存は完了していますが、検索可能な文字情報は埋め込まれていません。'
+          );
+        } finally {
+          setIsOcrLoading(false);
+        }
+      }
 
-  // エクスポート完了時の処理
-  const exportComplete = () => {
+      setScannedPages((prev) => [...prev, warpedImageSrc]);
+      setStep('export');
+    },
+    [clearFlyingTimer]
+  );
+
+  const cancelEdit = useCallback(() => {
+    setCurrentRawImage(null);
+    setStep(scannedPagesRef.current.length > 0 ? 'export' : 'scan');
+  }, []);
+
+  const exportComplete = useCallback(() => {
     startNewScan();
-  };
+  }, [startNewScan]);
 
-  // プレビュー画面からカメラ画面に戻る処理
-  const backToScanner = () => {
-    setCurrentRawImage(null); // 再撮影用に一時キャッシュをクリアする
+  const backToScanner = useCallback(() => {
+    setCurrentRawImage(null);
+    setOcrError(null);
     setStep('scan');
-  };
+  }, []);
 
-  // プレビュー画面から再編集に戻る処理
-  const backToEdit = () => {
-    // 直前に確定したページとOCR結果を取り除く
-    setOcrResults(prev => {
+  const backToEdit = useCallback(() => {
+    const lastIndex = scannedPagesRef.current.length - 1;
+    setOcrResults((prev) => {
       const next = { ...prev };
-      delete next[scannedPages.length - 1];
+      delete next[lastIndex];
       return next;
     });
-    setScannedPages(prev => prev.slice(0, -1));
+    setScannedPages((prev) => prev.slice(0, -1));
 
-    // 最後のページのフィルターモードを復元して配列から削る
-    setScannedPageFilterModes(prev => {
+    setScannedPageFilterModes((prev) => {
       const lastMode = prev[prev.length - 1] || 'document_enhanced';
       setCurrentFilterMode(lastMode);
       return prev.slice(0, -1);
     });
 
-    setInitialIsWarped(true); // フィルター適用画面に戻す
+    setOcrError(null);
+    setInitialIsWarped(true);
     setStep('edit');
-  };
+  }, []);
 
   return {
     step,
@@ -139,6 +163,8 @@ export function useScanSession() {
     exportMode,
     initialIsWarped,
     isOcrLoading,
+    ocrError,
+    dismissOcrError,
     flyingImage,
     currentFilterMode,
     startNewScan,

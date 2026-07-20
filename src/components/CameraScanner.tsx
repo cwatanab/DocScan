@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
-import type { Point } from '../utils/opencvHelper';
+import type { Point } from '../utils/geometry';
 import { detectDocumentWithFallback, getDefaultCorners } from '../utils/docSegHelper';
 import { useCameraStream } from './useCameraStream';
 import { resizeCanvas, clearAppCacheAndReload, isLocalExecution } from '../utils/imageExportHelper';
@@ -333,55 +333,16 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         </div>
       </div>
 
-      {/* 省電力スリープオーバーレイ (グラスモーフィズムデザイン) */}
       {isSleeping && (
-        <div
-          onClick={handleWakeUp}
-          className="scanner-sleep-overlay"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(9, 13, 22, 0.90)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100000,
-            cursor: 'pointer',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            transition: 'opacity 0.3s ease'
-          }}
-        >
-          <div style={{
-            width: '80px',
-            height: '80px',
-            borderRadius: '50%',
-            background: 'rgba(97, 144, 176, 0.15)',
-            border: '2px solid rgba(97, 144, 176, 0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '20px',
-            boxShadow: '0 0 20px rgba(97, 144, 176, 0.2)'
-          }}>
-            <RefreshCw style={{ width: '32px', height: '32px', color: '#6190b0' }} />
+        <div onClick={handleWakeUp} className="scanner-sleep-overlay">
+          <div className="scanner-sleep-icon-ring">
+            <RefreshCw className="scanner-sleep-icon" />
           </div>
-          <h2 style={{ color: '#ffffff', fontSize: '20px', marginBottom: '8px', fontWeight: 'bold' }}>省電力スリープモード</h2>
-          <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '14px', textAlign: 'center', margin: '0 24px 24px' }}>
+          <h2 className="scanner-sleep-title">省電力スリープモード</h2>
+          <p className="scanner-sleep-desc">
             一定時間枠線が検出されなかったため、カメラを一時停止しました。
           </p>
-          <button style={{
-            background: 'linear-gradient(135deg, #6190b0 0%, #4b7391 100%)',
-            color: '#ffffff',
-            border: 'none',
-            padding: '12px 28px',
-            borderRadius: '24px',
-            fontSize: '15px',
-            fontWeight: 'bold',
-            boxShadow: '0 4px 15px rgba(97, 144, 176, 0.3)',
-            cursor: 'pointer'
-          }}>
+          <button type="button" className="scanner-sleep-resume-btn">
             画面をタップして再開
           </button>
         </div>

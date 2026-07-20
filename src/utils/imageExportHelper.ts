@@ -4,6 +4,8 @@
 
 export type ExportFormat = 'png' | 'jpeg';
 
+const EXPORT_MAX_DIM = 1920;
+
 /**
  * 撮影日時のタイムスタンプ文字列 (YYYYMMDD_HHMMSS) を生成する
  */
@@ -32,13 +34,14 @@ export const triggerBlobDownload = (blob: Blob, filename: string): void => {
   URL.revokeObjectURL(url);
 };
 
-/**
- * メモリー節約とクラッシュ防止のため、Canvasを指定の最大辺 maxDim に縮小するヘルパー
- */
-export const resizeCanvas = (srcCanvas: HTMLCanvasElement, maxDim: number): HTMLCanvasElement => {
-  const dstCanvas = document.createElement('canvas');
-  let w = srcCanvas.width;
-  let h = srcCanvas.height;
+/** 最大辺 maxDim に収まるようアスペクト比を保ったサイズを返す */
+export const fitWithinMaxDim = (
+  width: number,
+  height: number,
+  maxDim: number
+): { width: number; height: number } => {
+  let w = width;
+  let h = height;
   if (w > maxDim || h > maxDim) {
     if (w > h) {
       h = Math.round((h * maxDim) / w);
@@ -48,6 +51,15 @@ export const resizeCanvas = (srcCanvas: HTMLCanvasElement, maxDim: number): HTML
       h = maxDim;
     }
   }
+  return { width: w, height: h };
+};
+
+/**
+ * メモリー節約とクラッシュ防止のため、Canvasを指定の最大辺 maxDim に縮小するヘルパー
+ */
+export const resizeCanvas = (srcCanvas: HTMLCanvasElement, maxDim: number): HTMLCanvasElement => {
+  const { width: w, height: h } = fitWithinMaxDim(srcCanvas.width, srcCanvas.height, maxDim);
+  const dstCanvas = document.createElement('canvas');
   dstCanvas.width = w;
   dstCanvas.height = h;
   const ctx = dstCanvas.getContext('2d');
@@ -65,17 +77,7 @@ export const resizeCanvasTo = (
   dstCanvas: HTMLCanvasElement,
   maxDim: number
 ): void => {
-  let w = srcCanvas.width;
-  let h = srcCanvas.height;
-  if (w > maxDim || h > maxDim) {
-    if (w > h) {
-      h = Math.round((h * maxDim) / w);
-      w = maxDim;
-    } else {
-      w = Math.round((w * maxDim) / h);
-      h = maxDim;
-    }
-  }
+  const { width: w, height: h } = fitWithinMaxDim(srcCanvas.width, srcCanvas.height, maxDim);
   // iOS Safari 対策: 同じサイズの場合は width/height の再設定をスキップして、描画バッファのリセットや真っ黒化を防ぐ
   if (dstCanvas.width !== w || dstCanvas.height !== h) {
     dstCanvas.width = w;
@@ -88,89 +90,60 @@ export const resizeCanvasTo = (
 };
 
 /**
- * DataURL画像を256色（インデックスカラー相当）に量子化減色した PNG Blobに変換する
+ * DataURL を読み込み、最大辺 EXPORT_MAX_DIM にリサイズした Canvas を返す
  */
-export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
+const loadImageToResizedCanvas = (imageSrc: string): Promise<HTMLCanvasElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      let w = img.width;
-      let h = img.height;
-      const maxDim = 1920;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) {
-          h = Math.round((h * maxDim) / w);
-          w = maxDim;
-        } else {
-          w = Math.round((w * maxDim) / h);
-          h = maxDim;
-        }
-      }
-      
+      const { width: w, height: h } = fitWithinMaxDim(img.width, img.height, EXPORT_MAX_DIM);
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, w, h);
-
-        
-        canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error("PNG blob generation failed"));
-          }
-        }, 'image/png');
-      } else {
-        reject(new Error("Canvas context failed"));
+      if (!ctx) {
+        reject(new Error('Canvas context failed'));
+        return;
       }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas);
     };
-    img.onerror = () => reject(new Error("Image load failed"));
+    img.onerror = () => reject(new Error('Image load failed'));
     img.src = imageSrc;
   });
 };
 
+const canvasToBlob = (
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality?: number
+): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error(`${type} blob generation failed`));
+      },
+      type,
+      quality
+    );
+  });
+};
+
 /**
- * DataURL画像を画質95%のJPEG Blobに変換する
+ * DataURL画像を PNG Blob に変換する
+ */
+export const convertToPngBlob = async (imageSrc: string): Promise<Blob> => {
+  const canvas = await loadImageToResizedCanvas(imageSrc);
+  return canvasToBlob(canvas, 'image/png');
+};
+
+/**
+ * DataURL画像を画質95%の JPEG Blob に変換する
  */
 export const convertToJpegBlob = async (imageSrc: string): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      let w = img.width;
-      let h = img.height;
-      const maxDim = 1920;
-      if (w > maxDim || h > maxDim) {
-        if (w > h) {
-          h = Math.round((h * maxDim) / w);
-          w = maxDim;
-        } else {
-          w = Math.round((w * maxDim) / h);
-          h = maxDim;
-        }
-      }
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, w, h);
-        canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error("JPEG blob generation failed"));
-          }
-        }, 'image/jpeg', 0.95);
-      } else {
-        reject(new Error("Canvas context failed"));
-      }
-    };
-    img.onerror = () => reject(new Error("Image load failed"));
-    img.src = imageSrc;
-  });
+  const canvas = await loadImageToResizedCanvas(imageSrc);
+  return canvasToBlob(canvas, 'image/jpeg', 0.95);
 };
 
 /**
@@ -253,11 +226,11 @@ export const shareSinglePage = async (
     } else {
       await downloadSinglePage(imageSrc, index, format, ts);
     }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
       return;
     }
-    console.error("Failed to share page:", err);
+    console.error('Failed to share page:', err);
     await downloadSinglePage(imageSrc, index, format, ts);
   }
 };
@@ -289,11 +262,11 @@ export const shareAllPages = async (
     } else {
       await downloadAllPages(pages, format);
     }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
       return;
     }
-    console.error("Failed to share pages:", err);
+    console.error('Failed to share pages:', err);
     await downloadAllPages(pages, format);
   }
 };

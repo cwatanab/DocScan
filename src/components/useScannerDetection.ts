@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Point } from '../utils/opencvHelper';
+import type { Point } from '../utils/geometry';
 import { calculateFocusScore } from '../utils/opencvHelper';
 import { detectDocumentAI, initDocSegEngine, isAISegEngineLoaded, checkShapeValidity } from '../utils/docSegHelper';
 import { resizeCanvasTo } from '../utils/imageExportHelper';
