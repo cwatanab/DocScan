@@ -15,8 +15,8 @@ async function loadIPAexGothicFont(): Promise<ArrayBuffer> {
   throw new Error('Failed to load IPAexGothic font from local path');
 }
 
-// PDF用に画像を長辺1600pxにリサイズし、画質95%のJPEGとして再圧縮する
-async function compressImageForPdf(imageSrc: string, maxDimension: number = 1600): Promise<string> {
+// PDF用に画像を長辺3840pxにリサイズし、画質95%のJPEGとして再圧縮する
+async function compressImageForPdf(imageSrc: string, maxDimension: number = 3840): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -72,8 +72,8 @@ export async function createSearchablePdf(
   for (const pageData of pages) {
     const { imageSrc, ocrResult } = pageData;
 
-    // PDF埋め込み用に画質を設定し、高画質な1600px JPEGに変換する
-    const compressedSrc = await compressImageForPdf(imageSrc, 1600);
+    // PDF埋め込み用に画質を設定し、高画質な3840px JPEGに変換する
+    const compressedSrc = await compressImageForPdf(imageSrc, 3840);
 
     // 画像データの埋め込み (PNG / JPEG の自動判定)
     let image: any;

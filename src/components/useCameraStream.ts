@@ -37,8 +37,8 @@ export const useCameraStream = ({ videoRef, enabled = true }: UseCameraStreamPro
         const constraints: MediaStreamConstraints = {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
+            width: { ideal: 3840 },
+            height: { ideal: 2160 }
           },
           audio: false
         };

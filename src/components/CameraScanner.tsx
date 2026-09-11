@@ -197,9 +197,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         
         if (ctx) {
           ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-          // 縮小処理を適用 (メモリ・処理フリーズ対策)
-          const resized = resizeCanvas(captureCanvas, 1600);
-          const dataUrl = resized.toDataURL('image/jpeg', 0.92);
+          // 高解像度3840pxで保持
+          const resized = resizeCanvas(captureCanvas, 3840);
+          const dataUrl = resized.toDataURL('image/jpeg', 0.95);
           
           const rawCorners = await detectDocumentWithFallback(resized, aiModelLoaded);
           

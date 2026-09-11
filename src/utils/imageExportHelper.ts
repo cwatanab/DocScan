@@ -4,7 +4,7 @@
 
 export type ExportFormat = 'png' | 'jpeg';
 
-const EXPORT_MAX_DIM = 1920;
+const EXPORT_MAX_DIM = 3840;
 
 /**
  * 撮影日時のタイムスタンプ文字列 (YYYYMMDD_HHMMSS) を生成する

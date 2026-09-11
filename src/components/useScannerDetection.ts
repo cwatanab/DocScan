@@ -285,7 +285,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
             tempCanvas = document.createElement('canvas');
           }
 
-          resizeCanvasTo(canvas, tempCanvas, 1920);
+          resizeCanvasTo(canvas, tempCanvas, 3840);
 
           const scaleX = tempCanvas.width / canvas.width;
           const scaleY = tempCanvas.height / canvas.height;
@@ -300,7 +300,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
             score: assessed.focusScore
           });
 
-          if (recentFramesRef.current.length > 8) {
+          if (recentFramesRef.current.length > 5) {
             const removed = recentFramesRef.current.shift();
             if (removed) {
               canvasPoolRef.current.push(removed.canvas);
