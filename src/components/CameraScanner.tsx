@@ -7,7 +7,8 @@ import { resizeCanvas, clearAppCacheAndReload, isLocalExecution } from '../utils
 import { useScannerDetection } from './useScannerDetection';
 import {
   getCaptureQualityGuidance,
-  QUALITY_FRAME_COLORS
+  QUALITY_FRAME_COLORS,
+  refineDocumentCorners
 } from '../utils/opencvHelper';
 
 interface CameraScannerProps {
@@ -184,9 +185,12 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         // 1回だけ toDataURL を実行
         const dataUrl = bestFrame.canvas.toDataURL('image/jpeg', 0.95);
         
+        // 撮影フレームの実エッジに四隅を吸着・精緻化
+        const finalCorners = refineDocumentCorners(bestFrame.canvas, bestFrame.corners);
+
         // キャッシュデータを読み込み終わった後にカメラ停止＆キャッシュクリアを行う
         stopCamera();
-        onCapture(dataUrl, bestFrame.corners);
+        onCapture(dataUrl, finalCorners);
       } else {
         // キャッシュが空の場合のフォールバック (現在のフレームを静的キャプチャし、安全な解像度1600pxに縮小)
         const video = videoRef.current;

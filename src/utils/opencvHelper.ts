@@ -5,13 +5,15 @@
  */
 
 export type { Point } from './geometry';
-export { sortPoints, distance } from './geometry';
+export { sortPoints, distance, checkShapeValidity } from './geometry';
+export { refineDocumentCorners, type RefineCornersOptions } from './cornerRefinement';
 
 export type { FilterMode } from './filterMode';
 
 export { loadOpenCV, isOpenCvReady } from './opencv/load';
 export { applyFilterToMat, applyFilter, detectOptimalFilter } from './opencv/filters';
 export { warpImage, rotateImage90, processWarpAndFilter } from './opencv/warp';
+export { processUnwarpAndFilter, unwarpDocumentAI } from './unwarpHelper';
 export { calculateFocusScore } from './opencv/focus';
 export {
   calculateMeanLuma,

@@ -1,6 +1,9 @@
 import * as ort from 'onnxruntime-web';
 import { setupOrtEnvironment } from './ortConfig';
-import { sortPoints, type Point } from './geometry';
+import { sortPoints, checkShapeValidity, type Point } from './geometry';
+import { refineDocumentCorners } from './cornerRefinement';
+
+export { checkShapeValidity };
 
 let docSegSession: ort.InferenceSession | null = null;
 let initPromise: Promise<ort.InferenceSession | null> | null = null;
@@ -22,7 +25,10 @@ export function initDocSegEngine(): Promise<ort.InferenceSession | null> {
       });
       return docSegSession;
     } catch (err: any) {
-      console.warn('[AI Seg] Document corner detection model not found or failed to load. Falling back to OpenCV. Error detail:', err?.message || err, err?.stack || '');
+      console.warn(
+        '[AI Seg] Document corner detection model not found or failed to load. Falling back to default corners (getDefaultCorners). Error detail:',
+        err?.message || err
+      );
       docSegSession = null;
       initPromise = null; // 再試行可能にする
       return null;
@@ -39,73 +45,22 @@ export function isAISegEngineLoaded(): boolean {
   return docSegSession !== null;
 }
 
-export function checkShapeValidity(
-  pts: Point[],
-  maxCos: number,
-  maxEdgeRatio: number = 1.3
-): boolean {
-  if (pts.length !== 4) return false;
-
-  // 1. 各内角の角度チェック (cosθ の絶対値が maxCos の範囲外なら弾く)
-  for (let i = 0; i < 4; i++) {
-    const pPrev = pts[(i + 3) % 4];
-    const pCurr = pts[i];
-    const pNext = pts[(i + 1) % 4];
-
-    const v1 = { x: pPrev.x - pCurr.x, y: pPrev.y - pCurr.y };
-    const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
-
-    const len1 = Math.hypot(v1.x, v1.y);
-    const len2 = Math.hypot(v2.x, v2.y);
-
-    const denominator = len1 * len2;
-    if (denominator === 0) {
-      return false; // ゼロ除算の回避（完全に頂点が重なっている場合）
-    }
-
-    const cosTheta = (v1.x * v2.x + v1.y * v2.y) / denominator;
-    if (Math.abs(cosTheta) > maxCos) {
-      return false; // 鋭角・鈍角制限
-    }
-  }
-
-  // 2. 対辺の長さ比チェック (極端に歪んだ台形などを弾く)
-  // pts は TL, TR, BR, BL の順に並んでいる前提
-  const dTop = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-  const dRight = Math.hypot(pts[1].x - pts[2].x, pts[1].y - pts[2].y);
-  const dBottom = Math.hypot(pts[2].x - pts[3].x, pts[2].y - pts[3].y);
-  const dLeft = Math.hypot(pts[3].x - pts[0].x, pts[3].y - pts[0].y);
-
-  if (dTop === 0 || dBottom === 0 || dLeft === 0 || dRight === 0) {
-    return false;
-  }
-
-  const ratioH = Math.max(dTop, dBottom) / Math.min(dTop, dBottom);
-  const ratioV = Math.max(dLeft, dRight) / Math.min(dLeft, dRight);
-
-  if (ratioH > maxEdgeRatio || ratioV > maxEdgeRatio) {
-    return false;
-  }
-
-  return true;
-}
-
 /**
- * AI (DocCornerNet LEAN) を用いたドキュメントの4隅検出
+ * AI (Paddle-OCR / PaddleX Document Processing 仕様) を用いたドキュメントの4隅検出
  * @param srcCanvas 元画像が描画されたCanvas
- * @returns 検出された4点。検出できなかった場合はnull
+ * @returns 検出された4点 (TL, TR, BR, BL)。検出できなかった場合は null (getDefaultCornersへフォールバック用)
  */
 export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Point[] | null> {
   try {
     // エンジンの初期化・取得
     const session = await initDocSegEngine();
     if (!session) {
-      return null; // モデルがない場合は自動でOpenCV検出にフォールバック
+      return null; // モデルがない場合は getDefaultCorners にフォールバック
     }
 
     const width = srcCanvas.width;
     const height = srcCanvas.height;
-    const inputSize = 224; // DocCornerNet の入力解像度
+    const inputSize = 224; // Paddle Document Processing の入力解像度 (224x224)
 
     // 1. 画像のプリプロセス: 224x224にリサイズ
     // (iOS Safariのバグ回避のため、シングルトンではなく毎回新規アロケート。300ms間隔のため負荷は軽微)
@@ -113,32 +68,32 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     tempCanvas.width = inputSize;
     tempCanvas.height = inputSize;
     const ctx = tempCanvas.getContext('2d')!;
-    
+
     // アスペクト比を維持せず 224x224 に伸縮描画
     ctx.drawImage(srcCanvas, 0, 0, width, height, 0, 0, inputSize, inputSize);
 
     const imgData = ctx.getImageData(0, 0, inputSize, inputSize);
     const data = imgData.data;
     const numPixels = inputSize * inputSize;
-    
-    // NHWC 形式: [1, 224, 224, 3] (ピクセル順にR, G, Bを詰める)
+
+    // NHWC 形式: [1, 224, 224, 3] (doc_seg.ort モデルの期待する入力仕様)
     const inputBuffer = new Float32Array(numPixels * 3);
 
-    // ImageNet 標準の正規化 (最適化: 除算を事前乗算スケールとオフセットにまとめ演算負荷を低減)
+    // 正規化: (pixel / 255.0 - mean) / std
     const rScale = 1.0 / (255.0 * 0.229);
-    const rOffset = 0.485 / 0.229;
+    const rSub = 0.485 / 0.229;
     const gScale = 1.0 / (255.0 * 0.224);
-    const gOffset = 0.456 / 0.224;
+    const gSub = 0.456 / 0.224;
     const bScale = 1.0 / (255.0 * 0.225);
-    const bOffset = 0.406 / 0.225;
+    const bSub = 0.406 / 0.225;
 
     let srcIdx = 0;
     let dstIdx = 0;
     for (let i = 0; i < numPixels; i++) {
-      inputBuffer[dstIdx++] = data[srcIdx++] * rScale - rOffset;
-      inputBuffer[dstIdx++] = data[srcIdx++] * gScale - gOffset;
-      inputBuffer[dstIdx++] = data[srcIdx++] * bScale - bOffset;
-      srcIdx++; // アルファ値をスキップ
+      inputBuffer[dstIdx++] = data[srcIdx++] * rScale - rSub;
+      inputBuffer[dstIdx++] = data[srcIdx++] * gScale - gSub;
+      inputBuffer[dstIdx++] = data[srcIdx++] * bScale - bSub;
+      srcIdx++; // Alphaチャンネルをスキップ
     }
 
     const inputTensor = new ort.Tensor('float32', inputBuffer, [1, inputSize, inputSize, 3]);
@@ -146,50 +101,60 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     // 2. 推論の実行
     const feeds = { [session.inputNames[0]]: inputTensor };
     const results = await session.run(feeds);
-    
+
     // モデルの出力レイヤーを取得 (順序不整合対策のため名前で動的に探索)
     let coordsTensor: ort.Tensor | null = null;
     let scoreTensor: ort.Tensor | null = null;
 
     for (const name of session.outputNames) {
-      if (name.includes('coord')) {
+      if (name.includes('coord') || name.includes('point') || name.includes('loc') || name.includes('box')) {
         coordsTensor = results[name];
-      } else if (name.includes('score') || name.includes('logit')) {
+      } else if (name.includes('score') || name.includes('logit') || name.includes('conf') || name.includes('cls')) {
         scoreTensor = results[name];
       }
     }
 
     // 見つからなかった場合の順序指定フォールバック
-    if (!coordsTensor || !scoreTensor) {
+    if (!coordsTensor && session.outputNames.length >= 1) {
       coordsTensor = results[session.outputNames[0]];
+    }
+    if (!scoreTensor && session.outputNames.length >= 2) {
       scoreTensor = results[session.outputNames[1]];
     }
 
-    if (!coordsTensor || !scoreTensor) {
-      console.error("[AI Seg] Output tensors not found in model results.");
+    if (!coordsTensor) {
+      console.error('[AI Seg] Corner coordinate output tensor not found in model results.');
       return null;
     }
 
     const coordsData = coordsTensor.data as Float32Array;
-    const scoreLogit = scoreTensor.data[0] as number;
 
     // 3. ドキュメントの存在確率（信頼度）の判定
-    const sigmoid = (x: number) => 1.0 / (1.0 + Math.exp(-x));
-    const confidence = sigmoid(scoreLogit);
+    if (scoreTensor) {
+      const scoreLogit = scoreTensor.data[0] as number;
+      const confidence = (scoreLogit < 0 || scoreLogit > 1)
+        ? 1.0 / (1.0 + Math.exp(-scoreLogit))
+        : scoreLogit;
 
-
-
-    // ドキュメントが見つからない（写っていない）と判断された場合は null
-    // 信頼度閾値を 0.5 に設定して曖昧な誤検出を防止
-    if (confidence < 0.5) {
-      return null;
+      // ドキュメントが見つからない（写っていない）と判断された場合は null にして getDefaultCorners へフォールバック
+      if (confidence < 0.5) {
+        return null;
+      }
     }
 
-    // 4. 誤検出フィルター: 画面全体を囲んでしまう巨大な枠線を排除
-    const x0 = coordsData[0]; const y0 = coordsData[1]; // TL
-    const x1 = coordsData[2]; const y1 = coordsData[3]; // TR
-    const x2 = coordsData[4]; const y2 = coordsData[5]; // BR
-    const x3 = coordsData[6]; const y3 = coordsData[7]; // BL
+    // 4. 誤検出フィルター: 画面全体を囲んでしまう巨大な枠線や極端な小領域を排除
+    // 座標が normalized ([0, 1]) または inputSize (224) 単位に対応
+    const scaleX = (coordsData[0] <= 1.0 && coordsData[2] <= 1.0) ? width : width / inputSize;
+    const scaleY = (coordsData[1] <= 1.0 && coordsData[3] <= 1.0) ? height : height / inputSize;
+
+    const x0 = coordsData[0] * (scaleX / width);
+    const y0 = coordsData[1] * (scaleY / height); // TL
+    const x1 = coordsData[2] * (scaleX / width);
+    const y1 = coordsData[3] * (scaleY / height); // TR
+    const x2 = coordsData[4] * (scaleX / width);
+    const y2 = coordsData[5] * (scaleY / height); // BR
+    const x3 = coordsData[6] * (scaleX / width);
+    const y3 = coordsData[7] * (scaleY / height); // BL
 
     // (A) 面積による条件チェック (Shoelace公式による正規化面積計算)
     const area = 0.5 * Math.abs(
@@ -205,7 +170,6 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     }
 
     // (B) 形状の歪みフィルター (三角形化・自己交差の排除)
-    // 生の検出時点では、カメラ移動中の追従が途切れるのを防ぐために 0.500 と少し緩めにチェック
     const rawPts = [
       { x: x0, y: y0 }, // TL
       { x: x1, y: y1 }, // TR
@@ -220,29 +184,30 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     // coordsDataの順序: TL(左上), TR(右上), BR(右下), BL(左下) の x, y ペア
     const pts: Point[] = [
       {
-        x: Math.max(0, Math.min(width, coordsData[0] * width)),
-        y: Math.max(0, Math.min(height, coordsData[1] * height))
+        x: Math.max(0, Math.min(width, coordsData[0] * scaleX)),
+        y: Math.max(0, Math.min(height, coordsData[1] * scaleY))
       }, // TL
       {
-        x: Math.max(0, Math.min(width, coordsData[2] * width)),
-        y: Math.max(0, Math.min(height, coordsData[3] * height))
+        x: Math.max(0, Math.min(width, coordsData[2] * scaleX)),
+        y: Math.max(0, Math.min(height, coordsData[3] * scaleY))
       }, // TR
       {
-        x: Math.max(0, Math.min(width, coordsData[4] * width)),
-        y: Math.max(0, Math.min(height, coordsData[5] * height))
+        x: Math.max(0, Math.min(width, coordsData[4] * scaleX)),
+        y: Math.max(0, Math.min(height, coordsData[5] * scaleY))
       }, // BR
       {
-        x: Math.max(0, Math.min(width, coordsData[6] * width)),
-        y: Math.max(0, Math.min(height, coordsData[7] * height))
+        x: Math.max(0, Math.min(width, coordsData[6] * scaleX)),
+        y: Math.max(0, Math.min(height, coordsData[7] * scaleY))
       }  // BL
     ];
 
+    // 頂点を整列(左上、右上、右下、左下)
+    const sorted = sortPoints(pts);
 
-    
-    // 頂点を整列(左上、右上、右下、左下)して返す
-    return sortPoints(pts);
+    // 画像のコントラスト境界（紙のエッジ）に四隅を吸着・精緻化
+    return refineDocumentCorners(srcCanvas, sorted);
   } catch (err) {
-    console.error("[AI Seg] Inference or post-processing failed:", err);
+    console.error('[AI Seg] Inference or post-processing failed:', err);
     return null;
   }
 }
@@ -304,4 +269,3 @@ export async function detectDocumentWithFallback(
   }
   return corners;
 }
-
