@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
-import { loadOpenCV, detectOptimalFilter, processWarpAndFilter, isOpenCvReady } from '../utils/opencvHelper';
+import { loadOpenCV, detectOptimalFilter, processUnwarpAndFilter, isOpenCvReady } from '../utils/opencvHelper';
 import type { Point, FilterMode } from '../utils/opencvHelper';
 import {
   combineFilterMode,
@@ -150,7 +150,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
           throw new Error('ソース画像の読み込みが完了していません');
         }
 
-        const url = processWarpAndFilter(
+        const url = await processUnwarpAndFilter(
           sourceEl,
           corners,
           targetFilterMode,
@@ -246,14 +246,14 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({
     void handleWarpPreview(false, rotation);
   }, [filterMode, rotation, isWarped, handleWarpPreview, cvReady]);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (!cvReady) return;
     const rect = previewImageRef.current?.getBoundingClientRect() ?? null;
 
     if (warpedImage) {
       onSave(warpedImage, filterMode, enableOcr, corners, rect);
     } else if (imageRef.current) {
-      const url = processWarpAndFilter(imageRef.current, corners, filterMode, rotation);
+      const url = await processUnwarpAndFilter(imageRef.current, corners, filterMode, rotation);
       if (url) {
         onSave(url, filterMode, enableOcr, corners, rect);
       }

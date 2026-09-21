@@ -62,8 +62,9 @@ PNG形式での出力時は 8ビット（256色）に量子化され、カラー
 
 - **パッケージマネージャー**：Bun
 - **フロントエンド**：React および Vite
-- **画像処理**：OpenCV.js
+- **画像処理・リマップ**：OpenCV.js
 - **四隅境界検出**：DocCornerNet LEAN (ONNX Runtime Web)
+- **ドキュメント湾曲補正**：Paddle-OCR UVDoc (ONNX Runtime Web + cv.remap)
 - **OCRエンジン**：pure-onnx-ocr (PaddleOCRv6 small)
 - **PDF生成**：pdf-lib
 - **PWA支援**：vite-plugin-pwa
