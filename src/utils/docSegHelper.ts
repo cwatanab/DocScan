@@ -22,6 +22,7 @@ export function initDocSegEngine(): Promise<ort.InferenceSession | null> {
       docSegSession = await ort.InferenceSession.create(modelPath, {
         executionProviders: ['wasm'],
       });
+      console.log('[AI Seg] Document corner detection model loaded successfully.');
       return docSegSession;
     } catch (err: any) {
       console.warn(
@@ -135,7 +136,8 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       const confidence = sigmoid(scoreLogit);
 
       // ドキュメントが見つからない（写っていない）と判断された場合は null にして getDefaultCorners へフォールバック
-      if (confidence < 0.5) {
+      // 閾値 0.40 で暗所や低コントラスト環境でも確実に検出
+      if (confidence < 0.40) {
         return null;
       }
     }
@@ -161,13 +163,14 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     }
 
     // (B) 形状の歪みフィルター (三角形化・自己交差の排除)
+    // 斜めからの撮影パースペクティブ歪みも許容しつつ異常値を弾く (cos 0.55 ≈ 56°〜124°, 辺比率 1.7)
     const rawPts = [
       { x: x0, y: y0 }, // TL
       { x: x1, y: y1 }, // TR
       { x: x2, y: y2 }, // BR
       { x: x3, y: y3 }  // BL
     ];
-    if (!checkShapeValidity(rawPts, 0.500, 1.4)) {
+    if (!checkShapeValidity(rawPts, 0.550, 1.7)) {
       return null;
     }
 
@@ -247,8 +250,8 @@ export async function detectDocumentWithFallback(
   if (aiModelLoaded) {
     corners = await detectDocumentAI(srcCanvas);
 
-    // AIの検出座標に対しても厳しめの形状妥当性チェックを行う
-    if (corners && !checkShapeValidity(corners, 0.240, 1.25)) {
+    // AIの検出座標の形状妥当性チェック
+    if (corners && !checkShapeValidity(corners, 0.45, 1.6)) {
       corners = null;
     }
   }

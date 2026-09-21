@@ -244,7 +244,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
 
       const resultCorners =
-        smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.28, 1.35)
+        smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.45, 1.6)
           ? smoothCornersRef.current
           : null;
 

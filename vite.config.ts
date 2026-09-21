@@ -19,12 +19,13 @@ const removeWasmPlugin = () => {
       try {
         const files = await fs.readdir(distDir)
         for (const file of files) {
-          // ort-wasm-simd-threaded.wasm (13.4MB) のみローカル配信を残し、
+          // ort-wasm-simd-threaded.wasm (13.4MB) と ort-wasm-simd-threaded.mjs (24KB) のみローカル配信を残し、
           // 25MB制限を超える jsep.wasm や不要な asyncify/jspi/mjs ファイルは削除する
           if (
             file.startsWith('ort-wasm-') &&
             (file.endsWith('.wasm') || file.endsWith('.mjs')) &&
-            file !== 'ort-wasm-simd-threaded.wasm'
+            file !== 'ort-wasm-simd-threaded.wasm' &&
+            file !== 'ort-wasm-simd-threaded.mjs'
           ) {
             await fs.unlink(join(distDir, file))
             console.log(`[RemoveWasm] Removed redundant WASM/MJS asset: ${file}`)
