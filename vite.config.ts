@@ -133,7 +133,7 @@ export default defineConfig({
         ]
       },
       workbox: {
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024, // OpenCV.js (10MB) キャッシュのため
+        maximumFileSizeToCacheInBytes: 22 * 1024 * 1024, // OpenCV.js (10MB) およびモデルファイル キャッシュのため
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
         globIgnores: ['**/opencv.js', '**/ort-wasm*.wasm', '**/ort-wasm*.mjs'],
         runtimeCaching: [
@@ -166,7 +166,7 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: /\/models\/.*\.(onnx|ort|txt)$/,
+            urlPattern: /\/models\/.*\.(onnx|ort|txt|part\d*)$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'models-cache',

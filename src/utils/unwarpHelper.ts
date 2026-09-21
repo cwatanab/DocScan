@@ -20,8 +20,20 @@ export function initUnwarpEngine(): Promise<ort.InferenceSession | null> {
 
   initPromise = (async () => {
     try {
-      const modelPath = `${import.meta.env.BASE_URL}models/uvdoc.ort`;
-      unwarpSession = await ort.InferenceSession.create(modelPath, {
+      const baseUrl = import.meta.env.BASE_URL;
+      const [res1, res2] = await Promise.all([
+        fetch(`${baseUrl}models/uvdoc.ort.part1`),
+        fetch(`${baseUrl}models/uvdoc.ort.part2`)
+      ]);
+      if (!res1.ok || !res2.ok) {
+        throw new Error(`Failed to load model chunks: part1=${res1.status}, part2=${res2.status}`);
+      }
+      const [buf1, buf2] = await Promise.all([res1.arrayBuffer(), res2.arrayBuffer()]);
+      const combined = new Uint8Array(buf1.byteLength + buf2.byteLength);
+      combined.set(new Uint8Array(buf1), 0);
+      combined.set(new Uint8Array(buf2), buf1.byteLength);
+
+      unwarpSession = await ort.InferenceSession.create(combined.buffer, {
         executionProviders: ['wasm'],
       });
       console.log('[AI Unwarp] Document Unwarping engine loaded successfully.');
