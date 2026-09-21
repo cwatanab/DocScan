@@ -16,6 +16,11 @@ interface CameraScannerProps {
   onCancel?: () => void;
 }
 
+const DISPLAY_VERSION =
+  typeof __APP_VERSION__ !== 'undefined'
+    ? `v${__APP_VERSION__.split('.').slice(0, 2).join('.')}`
+    : 'v0.2';
+
 export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -296,7 +301,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
                 <img src="/favicon.ico" alt="" className="scanner-logo-icon" />
               </div>
               <div className="scanner-header-content">
-                <h1 className="scanner-title">DocScan <span style={{ fontSize: '0.55em', opacity: 0.6, marginLeft: '6px', fontWeight: 'normal', verticalAlign: 'middle', WebkitTextFillColor: '#ffffff', WebkitBackgroundClip: 'unset', background: 'none' }}>v0.2</span></h1>
+                <h1 className="scanner-title">DocScan <span style={{ fontSize: '0.55em', opacity: 0.6, marginLeft: '6px', fontWeight: 'normal', verticalAlign: 'middle', WebkitTextFillColor: '#ffffff', WebkitBackgroundClip: 'unset', background: 'none' }}>{DISPLAY_VERSION}</span></h1>
                 <p className={`scanner-guidance-text ${guidanceToneClass}`}>{guidanceText}</p>
               </div>
             </div>

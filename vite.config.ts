@@ -60,6 +60,17 @@ const wasmGlueMiddleware = () => {
   }
 }
 
+// package.jsonのバージョンをHTMLタイトルに反映するプラグイン
+const htmlVersionPlugin = () => {
+  const displayVersion = `v${pkg.version.split('.').slice(0, 2).join('.')}`
+  return {
+    name: 'html-version-plugin',
+    transformIndexHtml(html: string) {
+      return html.replace(/<title>.*?<\/title>/i, `<title>DocScan ${displayVersion}</title>`)
+    }
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   resolve: {
@@ -68,7 +79,8 @@ export default defineConfig({
     }
   },
   define: {
-    __ORT_VERSION__: JSON.stringify(ORT_VERSION)
+    __ORT_VERSION__: JSON.stringify(ORT_VERSION),
+    __APP_VERSION__: JSON.stringify(pkg.version)
   },
   server: {
     host: true,
@@ -99,6 +111,7 @@ export default defineConfig({
     basicSsl(),
     removeWasmPlugin(),
     wasmGlueMiddleware(),
+    htmlVersionPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],
