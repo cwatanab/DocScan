@@ -143,18 +143,11 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     }
 
     // 4. 誤検出フィルター: 画面全体を囲んでしまう巨大な枠線や極端な小領域を排除
-    // 座標が normalized ([0, 1]) または inputSize (224) 単位に対応
-    const scaleX = (coordsData[0] <= 1.0 && coordsData[2] <= 1.0) ? width : width / inputSize;
-    const scaleY = (coordsData[1] <= 1.0 && coordsData[3] <= 1.0) ? height : height / inputSize;
-
-    const x0 = coordsData[0] * (scaleX / width);
-    const y0 = coordsData[1] * (scaleY / height); // TL
-    const x1 = coordsData[2] * (scaleX / width);
-    const y1 = coordsData[3] * (scaleY / height); // TR
-    const x2 = coordsData[4] * (scaleX / width);
-    const y2 = coordsData[5] * (scaleY / height); // BR
-    const x3 = coordsData[6] * (scaleX / width);
-    const y3 = coordsData[7] * (scaleY / height); // BL
+    // DocCornerNet の出力 coordsData は 0〜1 の正規化座標
+    const x0 = coordsData[0]; const y0 = coordsData[1]; // TL
+    const x1 = coordsData[2]; const y1 = coordsData[3]; // TR
+    const x2 = coordsData[4]; const y2 = coordsData[5]; // BR
+    const x3 = coordsData[6]; const y3 = coordsData[7]; // BL
 
     // (A) 面積による条件チェック (Shoelace公式による正規化面積計算)
     const area = 0.5 * Math.abs(
@@ -184,20 +177,20 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     // coordsDataの順序: TL(左上), TR(右上), BR(右下), BL(左下) の x, y ペア
     const pts: Point[] = [
       {
-        x: Math.max(0, Math.min(width, coordsData[0] * scaleX)),
-        y: Math.max(0, Math.min(height, coordsData[1] * scaleY))
+        x: Math.max(0, Math.min(width, coordsData[0] * width)),
+        y: Math.max(0, Math.min(height, coordsData[1] * height))
       }, // TL
       {
-        x: Math.max(0, Math.min(width, coordsData[2] * scaleX)),
-        y: Math.max(0, Math.min(height, coordsData[3] * scaleY))
+        x: Math.max(0, Math.min(width, coordsData[2] * width)),
+        y: Math.max(0, Math.min(height, coordsData[3] * height))
       }, // TR
       {
-        x: Math.max(0, Math.min(width, coordsData[4] * scaleX)),
-        y: Math.max(0, Math.min(height, coordsData[5] * scaleY))
+        x: Math.max(0, Math.min(width, coordsData[4] * width)),
+        y: Math.max(0, Math.min(height, coordsData[5] * height))
       }, // BR
       {
-        x: Math.max(0, Math.min(width, coordsData[6] * scaleX)),
-        y: Math.max(0, Math.min(height, coordsData[7] * scaleY))
+        x: Math.max(0, Math.min(width, coordsData[6] * width)),
+        y: Math.max(0, Math.min(height, coordsData[7] * height))
       }  // BL
     ];
 
@@ -205,7 +198,13 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     const sorted = sortPoints(pts);
 
     // 画像のコントラスト境界（紙のエッジ）に四隅を吸着・精緻化
-    return refineDocumentCorners(srcCanvas, sorted);
+    // 失敗時や例外発生時も必ず AI 粗検出座標 (sorted) をフォールバックして検出を維持
+    try {
+      return refineDocumentCorners(srcCanvas, sorted);
+    } catch (refineErr) {
+      console.warn('[AI Seg] Refine corners fallback to raw AI detection:', refineErr);
+      return sorted;
+    }
   } catch (err) {
     console.error('[AI Seg] Inference or post-processing failed:', err);
     return null;

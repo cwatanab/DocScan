@@ -145,9 +145,9 @@ export function refineDocumentCorners(
     width = canvas.width;
     height = canvas.height;
     if (width <= 0 || height <= 0) return corners;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return corners;
     try {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return corners;
       const imgData = ctx.getImageData(0, 0, width, height);
       data = imgData.data;
     } catch {
@@ -304,8 +304,8 @@ export function refineDocumentCorners(
     }
   }
 
-  // 形状の幾何学的妥当性チェック
-  if (!checkShapeValidity(refinedCorners, 0.20, 1.35)) {
+  // 形状の幾何学的妥当性チェック（斜めからのパースペクティブ歪みも許容しつつ異常値を弾く）
+  if (!checkShapeValidity(refinedCorners, 0.35, 1.45)) {
     // 形状が歪んでしまった場合は安全に元の corners を返す
     return corners;
   }

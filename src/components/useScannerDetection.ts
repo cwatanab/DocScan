@@ -230,17 +230,10 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
           if (avgDist > resetThreshold) {
             smoothCornersRef.current = targetCorners;
           } else {
-            // 適応型平滑化:
-            // - カメラ移動中 (avgDist 大): 追従性を高めて遅延を無くす (factor 最大 0.75)
-            // - カメラ静止中 (avgDist 小): 最新検出値（精緻化済み）に素早く収束させつつ、微小ジッターのみ防ぐ
-            let adaptiveFactor = 0.45;
-            if (avgDist < 3) {
-              adaptiveFactor = 0.25; // 静止時の微細ジッター防止
-            } else if (avgDist > 20) {
-              adaptiveFactor = 0.75; // 移動への素早い追従
-            } else {
-              adaptiveFactor = 0.25 + ((avgDist - 3) / 17) * 0.50;
-            }
+            // 移動量比率に応じた適応型平滑化:
+            // resetThreshold (画面12%) に対してどれだけ動いたかで追従率を調整 (0.35〜0.80)
+            const moveRatio = Math.min(1, avgDist / (resetThreshold * 0.25));
+            const adaptiveFactor = 0.35 + moveRatio * 0.45;
 
             smoothCornersRef.current = smoothCornersRef.current.map((pt, idx) => ({
               x: pt.x + (targetCorners![idx].x - pt.x) * adaptiveFactor,
@@ -251,7 +244,7 @@ export function useScannerDetection({ cameraActive }: UseScannerDetectionProps) 
       }
 
       const resultCorners =
-        smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.24, 1.25)
+        smoothCornersRef.current && checkShapeValidity(smoothCornersRef.current, 0.28, 1.35)
           ? smoothCornersRef.current
           : null;
 
