@@ -1,7 +1,6 @@
 import * as ort from 'onnxruntime-web';
 import { setupOrtEnvironment } from './ortConfig';
 import { sortPoints, checkShapeValidity, type Point } from './geometry';
-import { refineDocumentCorners } from './cornerRefinement';
 
 export { checkShapeValidity };
 
@@ -132,9 +131,8 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
     // 3. ドキュメントの存在確率（信頼度）の判定
     if (scoreTensor) {
       const scoreLogit = scoreTensor.data[0] as number;
-      const confidence = (scoreLogit < 0 || scoreLogit > 1)
-        ? 1.0 / (1.0 + Math.exp(-scoreLogit))
-        : scoreLogit;
+      const sigmoid = (x: number) => 1.0 / (1.0 + Math.exp(-x));
+      const confidence = sigmoid(scoreLogit);
 
       // ドキュメントが見つからない（写っていない）と判断された場合は null にして getDefaultCorners へフォールバック
       if (confidence < 0.5) {
@@ -194,17 +192,8 @@ export async function detectDocumentAI(srcCanvas: HTMLCanvasElement): Promise<Po
       }  // BL
     ];
 
-    // 頂点を整列(左上、右上、右下、左下)
-    const sorted = sortPoints(pts);
-
-    // 画像のコントラスト境界（紙のエッジ）に四隅を吸着・精緻化
-    // 失敗時や例外発生時も必ず AI 粗検出座標 (sorted) をフォールバックして検出を維持
-    try {
-      return refineDocumentCorners(srcCanvas, sorted);
-    } catch (refineErr) {
-      console.warn('[AI Seg] Refine corners fallback to raw AI detection:', refineErr);
-      return sorted;
-    }
+    // 頂点を整列(左上、右上、右下、左下)して返す
+    return sortPoints(pts);
   } catch (err) {
     console.error('[AI Seg] Inference or post-processing failed:', err);
     return null;

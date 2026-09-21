@@ -211,9 +211,10 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
           const dataUrl = resized.toDataURL('image/jpeg', 0.95);
           
           const rawCorners = await detectDocumentWithFallback(resized, aiModelLoaded);
+          const finalCorners = refineDocumentCorners(resized, rawCorners);
           
           stopCamera();
-          onCapture(dataUrl, rawCorners);
+          onCapture(dataUrl, finalCorners);
         }
       }
     } catch (err) {
@@ -240,7 +241,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCance
         if (ctx) {
           ctx.drawImage(img, 0, 0);
           
-          const corners = await detectDocumentWithFallback(tempCanvas, aiModelLoaded);
+          const rawCorners = await detectDocumentWithFallback(tempCanvas, aiModelLoaded);
+          const corners = refineDocumentCorners(tempCanvas, rawCorners);
           
           stopCamera();
           onCapture(dataUrl, corners);
